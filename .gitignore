@@ -1,0 +1,17 @@
+# Local dev files
+recursive-agent.txt
+.claude/
+.playwright-mcp/
+
+# Old/legacy files (can remove later)
+shibbydex-2022-haptic.js
+shibbydex-2022-buttplug.min.js
+buttplug.min.js
+
+# Build output (when we add Vite)
+node_modules/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speech Recognition Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 { color: #00d4ff; margin-bottom: 5px; }
+    .subtitle { color: #888; margin-bottom: 20px; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .status-card {
+      background: #16213e;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid #444;
+    }
+    .status-card.good { border-left-color: #00ff88; }
+    .status-card.warn { border-left-color: #ffaa00; }
+    .status-card.bad { border-left-color: #ff4466; }
+    .status-card h3 { margin: 0 0 8px 0; font-size: 14px; color: #888; }
+    .status-card .value { font-size: 18px; font-weight: bold; }
+
+    .controls {
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .record-btn {
+      width: 100%;
+      padding: 20px;
+      font-size: 18px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .record-btn.idle { background: #00d4ff; color: #000; }
+    .record-btn.recording {
+      background: #ff4466;
+      color: #fff;
+      animation: pulse 1s infinite;
+    }
+    .record-btn:disabled { background: #444; cursor: not-allowed; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .transcript-box {
+      background: #0f0f1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 120px;
+      margin-bottom: 20px;
+    }
+    .transcript-box h3 { margin: 0 0 10px 0; color: #00d4ff; }
+    .transcript { font-size: 16px; line-height: 1.6; }
+    .transcript .interim { color: #888; font-style: italic; }
+    .transcript .final { color: #00ff88; }
+
+    .info-box {
+      background: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 15px;
+      font-size: 14px;
+    }
+    .info-box code {
+      background: #0a0a12;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Speech Recognition Demo</h1>
+  <p class="subtitle">Web Speech API - works in Chrome/Edge</p>
+
+  <!-- STATUS CARDS: Show browser capabilities -->
+  <div class="status-grid">
+    <div class="status-card" id="apiCard">
+      <h3>API Support</h3>
+      <div class="value" id="apiStatus">Checking...</div>
+    </div>
+    <div class="status-card" id="localCard">
+      <h3>Local Processing</h3>
+      <div class="value" id="localStatus">Checking...</div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button class="record-btn idle" id="recordBtn" onclick="toggleRecording()">
+      Start Recording
+    </button>
+  </div>
+
+  <!-- TRANSCRIPT OUTPUT -->
+  <div class="transcript-box">
+    <h3>Transcript</h3>
+    <div class="transcript" id="transcript">
+      <span style="color:#666">Click "Start Recording" and speak...</span>
+    </div>
+  </div>
+
+  <!-- SETUP INFO -->
+  <div class="info-box">
+    <strong>Enable offline/local processing:</strong><br>
+    <code>chrome://settings/accessibility</code> → Enable <strong>Live Caption</strong>
+  </div>
+
+  <script>
+    /**
+     * ============================================
+     * WEB SPEECH API - CORE IMPLEMENTATION
+     * ============================================
+     *
+     * REQUIREMENTS:
+     * - Chrome, Edge, or Safari (Firefox has limited support)
+     * - HTTPS or localhost
+     * - Microphone permission
+     *
+     * FOR OFFLINE SUPPORT (Chrome only):
+     * - Enable Live Caption in chrome://settings/accessibility
+     * - Downloads ~60MB SODA language model
+     */
+
+    // Get the SpeechRecognition constructor (prefixed in some browsers)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    // State
+    let recognition = null;
+    let isRecording = false;
+    let finalTranscript = '';
+
+    /**
+     * Check browser capabilities on page load
+     */
+    async function checkCapabilities() {
+      const apiCard = document.getElementById('apiCard');
+      const apiStatus = document.getElementById('apiStatus');
+      const localCard = document.getElementById('localCard');
+      const localStatus = document.getElementById('localStatus');
+
+      // Check if SpeechRecognition API exists
+      if (SpeechRecognition) {
+        apiStatus.textContent = 'Available';
+        apiCard.classList.add('good');
+      } else {
+        apiStatus.textContent = 'Not Supported';
+        apiCard.classList.add('bad');
+        document.getElementById('recordBtn').disabled = true;
+        return;
+      }
+
+      // Check if local (SODA) processing is available
+      // This is a newer API, may not exist in all browsers
+      if (typeof SpeechRecognition.available === 'function') {
+        try {
+          const status = await SpeechRecognition.available({
+            langs: ['en-US'],
+            processLocally: true
+          });
+          // Returns: 'available' | 'downloadable' | 'unavailable'
+          localStatus.textContent = status;
+          localCard.classList.add(status === 'available' ? 'good' : 'warn');
+        } catch (e) {
+          localStatus.textContent = 'Error';
+          localCard.classList.add('bad');
+        }
+      } else {
+        // Older browser or non-Chrome - can't check local availability
+        localStatus.textContent = 'Unknown';
+        localCard.classList.add('warn');
+      }
+    }
+
+    /**
+     * Create and configure a SpeechRecognition instance
+     * This is the core setup - copy this for integration
+     */
+    function createRecognition() {
+      const rec = new SpeechRecognition();
+
+      // CONFIGURATION OPTIONS:
+      rec.continuous = true;        // Keep listening (don't stop after first result)
+      rec.interimResults = true;    // Get partial results as user speaks
+      rec.lang = 'en-US';           // Language (BCP 47 tag)
+      rec.maxAlternatives = 1;      // Number of alternative transcriptions
+
+      // Track errors to prevent restart loops
+      let hadError = false;
+
+      /**
+       * MAIN RESULT HANDLER
+       * This fires for both interim (partial) and final results
+       */
+      rec.onresult = (event) => {
+        let interimTranscript = '';
+
+        // Process results starting from resultIndex
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const transcript = result[0].transcript;
+          // const confidence = result[0].confidence; // Often 0.0 for local
+
+          if (result.isFinal) {
+            // User finished speaking this phrase
+            finalTranscript += transcript + ' ';
+          } else {
+            // User still speaking - this text may change
+            interimTranscript += transcript;
+          }
+        }
+
+        // Update display
+        document.getElementById('transcript').innerHTML =
+          `<span class="final">${finalTranscript}</span>` +
+          `<span class="interim">${interimTranscript}</span>`;
+      };
+
+      /**
+       * ERROR HANDLER
+       * Common errors: 'network', 'not-allowed', 'no-speech'
+       */
+      rec.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        hadError = true;
+
+        if (event.error === 'network') {
+          // No internet and local processing not available
+          // Suggest enabling Live Caption for offline support
+          stopRecording();
+        } else if (event.error === 'not-allowed') {
+          // User denied microphone permission
+          stopRecording();
+        }
+        // 'no-speech' is common and can be ignored (will auto-restart)
+      };
+
+      /**
+       * END HANDLER
+       * Recognition stops naturally after silence
+       * Auto-restart if still supposed to be recording
+       */
+      rec.onend = () => {
+        if (isRecording && !hadError) {
+          // Restart to keep listening
+          setTimeout(() => {
+            if (isRecording) {
+              hadError = false;
+              rec.start();
+            }
+          }, 100);
+        }
+      };
+
+      return rec;
+    }
+
+    /**
+     * Start recording
+     */
+    function startRecording() {
+      recognition = createRecognition();
+
+      try {
+        recognition.start();
+        isRecording = true;
+
+        const btn = document.getElementById('recordBtn');
+        btn.textContent = 'Stop Recording';
+        btn.classList.remove('idle');
+        btn.classList.add('recording');
+      } catch (e) {
+        console.error('Failed to start recognition:', e);
+      }
+    }
+
+    /**
+     * Stop recording
+     */
+    function stopRecording() {
+      isRecording = false;
+
+      if (recognition) {
+        try {
+          recognition.stop();
+        } catch (e) {
+          // May throw if already stopped
+        }
+        recognition = null;
+      }
+
+      const btn = document.getElementById('recordBtn');
+      btn.textContent = 'Start Recording';
+      btn.classList.remove('recording');
+      btn.classList.add('idle');
+    }
+
+    /**
+     * Toggle recording state
+     */
+    function toggleRecording() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        finalTranscript = '';
+        document.getElementById('transcript').innerHTML = '';
+        startRecording();
+      }
+    }
+
+    // Initialize on page load
+    checkCapabilities();
+  </script>
+</body>
+</html>
