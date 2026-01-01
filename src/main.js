@@ -357,6 +357,7 @@ function handleSettingsChange() {
   saveSettings(settings);
   updateFieldStates();
   updatePromptPreviews();
+  updateStartButton();
 }
 
 function handleShare() {
@@ -390,6 +391,11 @@ function closeSettings() {
 // ============================================================================
 // Device & Speech
 // ============================================================================
+function updateStartButton() {
+  // Enable start if device connected OR clicker enabled (toyless mode)
+  startBtn.disabled = !(device || settings.clickerEnabled);
+}
+
 async function handleConnect() {
   try {
     setStatus('Connecting...', 'info');
@@ -397,7 +403,7 @@ async function handleConnect() {
     setStatus(`Connected: ${device.name}`, 'success');
     connectBtn.textContent = `✓ ${device.name}`;
     connectBtn.disabled = true;
-    startBtn.disabled = false;
+    updateStartButton();
     testBtn.disabled = false;
   } catch (e) {
     setStatus(`Connection failed: ${e.message}`, 'error');
@@ -615,6 +621,7 @@ function handleStartStop() {
 // ============================================================================
 prompts = loadPrompts();
 settings = loadSettings();
+updateStartButton();
 
 if (isSharedConfig()) {
   setStatus('Loaded shared config - customize in settings', 'success');
