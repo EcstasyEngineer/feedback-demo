@@ -96,6 +96,7 @@ export function generateShareUrl(prompts, settings) {
     prompts,
     settings: {
       rewardText: settings.rewardText,
+      sessionDuration: settings.sessionDuration,
       intensity: settings.intensity,
       delay: settings.delay,
       reward: settings.reward,
@@ -142,20 +143,31 @@ const PATTERNS = {
 // Session Settings
 // ============================================================================
 
+// Metapattern functions - scale effective max based on session progress
+const METAPATTERNS = {
+  constant: t => 1,           // full range always
+  climb: t => t,              // range opens up over session
+  descent: t => 1 - t,        // range closes down over session
+};
+
 const DEFAULT_SETTINGS = {
   rewardText: 'Good Puppet',
+  sessionDuration: 10 * 60,   // 10 minutes in seconds
   intensity: {
-    patterns: ['climb', 'surge', 'wave'],  // unpredictable - can't focus on this
+    metapattern: 'constant',  // session-level pattern
+    patterns: ['climb', 'surge', 'wave'],  // micro patterns
     min: 0.1,   // 10%
     max: 0.7,   // 70%
   },
   delay: {
-    patterns: ['constant'],  // predictable - focus on the mantra rhythm
+    metapattern: 'climb',     // starts quick, slows down over session
+    patterns: ['constant'],   // predictable within the moment
     min: 4.0,   // seconds - anticipation builds
     max: 12.0,  // long enough to crave the next one
   },
   reward: {
-    patterns: ['climb', 'surge', 'wave'],  // unpredictable - can't focus on this
+    metapattern: 'constant',  // full range always
+    patterns: ['climb', 'surge', 'wave'],  // unpredictable
     min: 0.5,   // seconds - quick hit
     max: 1.2,   // brief burst of pleasure
   },
@@ -187,6 +199,7 @@ export function loadSettings() {
     const s = migrateSettings(urlConfig.settings);
     return {
       rewardText: s.rewardText || DEFAULT_SETTINGS.rewardText,
+      sessionDuration: s.sessionDuration || DEFAULT_SETTINGS.sessionDuration,
       intensity: { ...DEFAULT_SETTINGS.intensity, ...s.intensity },
       delay: { ...DEFAULT_SETTINGS.delay, ...s.delay },
       reward: { ...DEFAULT_SETTINGS.reward, ...s.reward },
@@ -200,6 +213,7 @@ export function loadSettings() {
       const parsed = migrateSettings(JSON.parse(stored));
       return {
         rewardText: parsed.rewardText || DEFAULT_SETTINGS.rewardText,
+        sessionDuration: parsed.sessionDuration || DEFAULT_SETTINGS.sessionDuration,
         intensity: { ...DEFAULT_SETTINGS.intensity, ...parsed.intensity },
         delay: { ...DEFAULT_SETTINGS.delay, ...parsed.delay },
         reward: { ...DEFAULT_SETTINGS.reward, ...parsed.reward },
@@ -254,6 +268,8 @@ export function createSession(settings) {
     delay: createCategoryState(settings.delay.patterns, settings.patternSwitch),
     reward: createCategoryState(settings.reward.patterns, settings.patternSwitch),
     step: 0,
+    startTime: Date.now(),
+    duration: settings.sessionDuration * 1000,  // convert to ms
   };
 }
 
@@ -291,28 +307,69 @@ function advanceCategory(catState, switchSettings) {
 }
 
 /**
+ * Get session progress (0-1)
+ */
+function getSessionProgress(session) {
+  const elapsed = Date.now() - session.startTime;
+  return Math.min(1, Math.max(0, elapsed / session.duration));
+}
+
+/**
+ * Apply metapattern to scale effective max
+ */
+function applyMetapattern(metapatternName, min, max, sessionProgress) {
+  const metaFn = METAPATTERNS[metapatternName] || METAPATTERNS.constant;
+  const scale = metaFn(sessionProgress);
+  const effectiveMax = min + (max - min) * scale;
+  return { min, max: effectiveMax };
+}
+
+/**
  * Get next values and advance session state
  */
 export function getNextValues(settings, session) {
+  const progress = getSessionProgress(session);
+
+  // Apply metapatterns to get effective ranges
+  const intensityRange = applyMetapattern(
+    settings.intensity.metapattern,
+    settings.intensity.min,
+    settings.intensity.max,
+    progress
+  );
+  const delayRange = applyMetapattern(
+    settings.delay.metapattern,
+    settings.delay.min * 1000,
+    settings.delay.max * 1000,
+    progress
+  );
+  const rewardRange = applyMetapattern(
+    settings.reward.metapattern,
+    settings.reward.min * 1000,
+    settings.reward.max * 1000,
+    progress
+  );
+
+  // Get values from micro patterns within effective ranges
   const intensity = getPatternValue(
     session.intensity.currentPattern,
     session.intensity.index,
-    settings.intensity.min,
-    settings.intensity.max
+    intensityRange.min,
+    intensityRange.max
   );
 
   const delay = getPatternValue(
     session.delay.currentPattern,
     session.delay.index,
-    settings.delay.min * 1000,
-    settings.delay.max * 1000
+    delayRange.min,
+    delayRange.max
   );
 
   const reward = getPatternValue(
     session.reward.currentPattern,
     session.reward.index,
-    settings.reward.min * 1000,
-    settings.reward.max * 1000
+    rewardRange.min,
+    rewardRange.max
   );
 
   // Advance each category
@@ -321,14 +378,14 @@ export function getNextValues(settings, session) {
   advanceCategory(session.reward, settings.patternSwitch);
   session.step++;
 
-  return { intensity, delay, reward };
+  return { intensity, delay, reward, progress };
 }
 
 /**
- * Check if session should end - no longer used but kept for compatibility
+ * Check if session duration has elapsed
  */
 export function isSessionComplete(session) {
-  return false; // Sessions now run indefinitely until stopped
+  return getSessionProgress(session) >= 1;
 }
 
 /**
@@ -339,4 +396,4 @@ export function getPatternLength(patternName) {
   return (PATTERNS[patternName] || PATTERNS.constant).length;
 }
 
-export { PATTERNS, DEFAULT_SETTINGS };
+export { PATTERNS, METAPATTERNS, DEFAULT_SETTINGS };

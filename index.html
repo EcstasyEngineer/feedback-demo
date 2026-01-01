@@ -25,6 +25,18 @@
       left: 20px;
       display: flex;
       gap: 10px;
+      transition: opacity 0.3s;
+    }
+
+    body.session-active .controls .connect-btn,
+    body.session-active .controls .test-btn,
+    body.session-active .controls .settings-btn {
+      display: none;
+    }
+
+    body.session-active .controls {
+      left: 50%;
+      transform: translateX(-50%);
     }
 
     button {
@@ -52,17 +64,36 @@
 
     .status {
       position: fixed;
-      top: 20px;
+      bottom: 20px;
       right: 20px;
-      padding: 10px 16px;
+      padding: 8px 14px;
       border-radius: 8px;
-      font-size: 14px;
+      font-size: 12px;
       background: #1a1a2e;
       border: 1px solid #333;
+      opacity: 0.6;
+      transition: opacity 0.3s;
     }
 
-    .status.success { border-color: #00ff88; color: #00ff88; }
-    .status.error { border-color: #ff4466; color: #ff4466; }
+    .status:hover { opacity: 1; }
+    .status.success { border-color: #00ff88; color: #00ff88; opacity: 0.8; }
+    .status.error { border-color: #ff4466; color: #ff4466; opacity: 1; }
+
+    body.session-active .status {
+      bottom: auto;
+      top: 60px;
+      right: 50%;
+      transform: translateX(50%);
+    }
+
+    .session-display {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      text-align: center;
+    }
 
     .prompt, .feedback {
       font-size: clamp(2rem, 10vw, 5rem);
@@ -88,12 +119,86 @@
       font-size: 12px;
       color: #666;
       text-align: center;
+      transition: opacity 0.3s;
+    }
+
+    body.session-active .info {
+      opacity: 0;
+      pointer-events: none;
     }
 
     .info code {
       background: #1a1a2e;
       padding: 2px 6px;
       border-radius: 3px;
+    }
+
+    /* Start Modal */
+    .start-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 100;
+    }
+
+    .start-modal.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .start-modal-content {
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 32px;
+      text-align: center;
+    }
+
+    .start-modal-content h2 {
+      margin-bottom: 20px;
+      color: #fff;
+    }
+
+    .duration-input {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .duration-input input {
+      width: 80px;
+      padding: 12px;
+      font-size: 24px;
+      text-align: center;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #0a0a12;
+      color: #fff;
+    }
+
+    .duration-input input:focus {
+      outline: none;
+      border-color: #00d4ff;
+    }
+
+    .duration-input span {
+      font-size: 18px;
+      color: #888;
+    }
+
+    .start-session-btn {
+      background: #00ff88;
+      color: #000;
+      padding: 14px 48px;
+      font-size: 18px;
+      font-weight: bold;
     }
 
     /* Settings Panel */
@@ -315,11 +420,25 @@
 
   <div class="status" id="status">Initializing...</div>
 
-  <div class="prompt" id="prompt"></div>
-  <div class="feedback" id="feedback"></div>
+  <div class="session-display">
+    <div class="prompt" id="prompt"></div>
+    <div class="feedback" id="feedback"></div>
+  </div>
 
-  <div class="info">
+  <div class="info" id="info">
     For offline speech: <code>chrome://settings/accessibility</code> → Enable Live Caption
+  </div>
+
+  <!-- Start Modal -->
+  <div class="start-modal" id="startModal">
+    <div class="start-modal-content">
+      <h2>Session Duration</h2>
+      <div class="duration-input">
+        <input type="number" id="sessionDuration" min="1" max="60" value="10">
+        <span>minutes</span>
+      </div>
+      <button class="start-session-btn" id="startSessionBtn">Begin</button>
+    </div>
   </div>
 
   <!-- Settings Panel -->
@@ -351,6 +470,14 @@
       <h3 style="margin: 16px 0 12px; color: #888;">Intensity</h3>
       <div class="settings-row">
         <div class="settings-group">
+          <label>Session Arc</label>
+          <select id="intensityMeta">
+            <option value="constant">Constant</option>
+            <option value="climb">Climb</option>
+            <option value="descent">Descent</option>
+          </select>
+        </div>
+        <div class="settings-group">
           <label>Min %</label>
           <input type="number" id="intensityMin" min="1" max="100" value="10">
         </div>
@@ -367,6 +494,14 @@
       <h3 style="margin: 16px 0 12px; color: #888;">Delay Between Prompts</h3>
       <div class="settings-row">
         <div class="settings-group">
+          <label>Session Arc</label>
+          <select id="delayMeta">
+            <option value="constant">Constant</option>
+            <option value="climb" selected>Climb</option>
+            <option value="descent">Descent</option>
+          </select>
+        </div>
+        <div class="settings-group">
           <label>Min (s)</label>
           <input type="number" id="delayMin" min="0.1" max="60" step="0.1" value="4">
         </div>
@@ -382,6 +517,14 @@
 
       <h3 style="margin: 16px 0 12px; color: #888;">Reward Duration</h3>
       <div class="settings-row">
+        <div class="settings-group">
+          <label>Session Arc</label>
+          <select id="rewardMeta">
+            <option value="constant">Constant</option>
+            <option value="climb">Climb</option>
+            <option value="descent">Descent</option>
+          </select>
+        </div>
         <div class="settings-group">
           <label>Min (s)</label>
           <input type="number" id="rewardMin" min="0.1" max="30" step="0.1" value="0.5">
