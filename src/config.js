@@ -13,16 +13,22 @@ const SETTINGS_KEY = 'callresponse_settings';
 // ============================================================================
 
 const DEFAULT_PROMPTS = [
+  // Direct obedience
   'I obey',
-  'Yes Master',
-  'Thank you',
   'I submit',
-  'Please',
-  'I need it',
-  'I belong to you',
-  'Use me',
-  'I am yours',
-  'More please',
+  'I surrender',
+  'I do not resist',
+  // Master acknowledgment
+  'Yes Master',
+  'Master Knows Best',
+  'I belong to Master',
+  // Mental state
+  'My mind is empty',
+  'Obedience is pleasure',
+  'Pleasure is obedience',
+  // Desire
+  'I need to be used',
+  'I need to be controlled',
 ];
 
 export function loadPrompts() {
@@ -96,6 +102,8 @@ export function generateShareUrl(prompts, settings) {
     prompts,
     settings: {
       rewardText: settings.rewardText,
+      petName: settings.petName,
+      pronounProgression: settings.pronounProgression,
       sessionDuration: settings.sessionDuration,
       intensity: settings.intensity,
       delay: settings.delay,
@@ -143,37 +151,71 @@ const PATTERNS = {
 // Session Settings
 // ============================================================================
 
-// Metapattern functions - scale effective max based on session progress
-const METAPATTERNS = {
-  constant: t => 1,           // full range always
-  climb: t => t,              // range opens up over session
-  descent: t => 1 - t,        // range closes down over session
+// Session arc functions - return {min, max} as fractions of the configured range
+// t = session progress (0 to 1)
+// All return normalized values where 0 = configured min, 1 = configured max
+const SESSION_ARCS = {
+  // Full range always
+  constant: t => ({ min: 0, max: 1 }),
+
+  // Anchored at bottom (min fixed)
+  open_up: t => ({ min: 0, max: t }),
+  close_down: t => ({ min: 0, max: 1 - t }),
+
+  // Anchored at top (max fixed)
+  open_down: t => ({ min: 1 - t, max: 1 }),
+  close_up: t => ({ min: t, max: 1 }),
+
+  // Slide up (constant width, moves from bottom to top)
+  slide_up_wide: t => ({ min: t * 0.25, max: 0.75 + t * 0.25 }),     // 75% width
+  slide_up: t => ({ min: t * 0.5, max: 0.5 + t * 0.5 }),             // 50% width
+  slide_up_narrow: t => ({ min: t * 0.75, max: 0.25 + t * 0.75 }),   // 25% width
+
+  // Slide down (constant width, moves from top to bottom)
+  slide_down_wide: t => ({ min: 0.25 - t * 0.25, max: 1 - t * 0.25 }),   // 75% width
+  slide_down: t => ({ min: 0.5 - t * 0.5, max: 1 - t * 0.5 }),           // 50% width
+  slide_down_narrow: t => ({ min: 0.75 - t * 0.75, max: 1 - t * 0.75 }), // 25% width
+
+  // Focus (width shrinks as it moves)
+  focus_high: t => {
+    const width = 1 - t * 0.8;  // 100% -> 20%
+    return { min: Math.max(0, t - width/2), max: Math.min(1, t + width/2) };
+  },
+  focus_low: t => {
+    const width = 1 - t * 0.8;
+    const center = 1 - t;
+    return { min: Math.max(0, center - width/2), max: Math.min(1, center + width/2) };
+  },
 };
 
 const DEFAULT_SETTINGS = {
   rewardText: 'Good Puppet',
-  sessionDuration: 10 * 60,   // 10 minutes in seconds
+  petName: 'Puppet',
+  pronounProgression: true,  // gradually shift "I" → petName over session
+  clickerEnabled: false,     // play click sound with reward
+  promptsEnabled: true,      // false = loading mode (auto clicker+vibe on timer)
+  sessionDuration: 600,  // 10 minutes in seconds
   intensity: {
-    metapattern: 'constant',  // session-level pattern
-    patterns: ['climb', 'surge', 'wave'],  // micro patterns
-    min: 0.1,   // 10%
-    max: 0.7,   // 70%
+    metapattern: 'close_up',
+    patterns: ['climb', 'surge', 'wave'],
+    min: 0.1,
+    max: 0.7,
   },
   delay: {
-    metapattern: 'climb',     // starts quick, slows down over session
-    patterns: ['constant'],   // predictable within the moment
-    min: 4.0,   // seconds - anticipation builds
-    max: 12.0,  // long enough to crave the next one
+    metapattern: 'focus_high',
+    patterns: ['random'],
+    min: 4,
+    max: 12,
   },
   reward: {
-    metapattern: 'constant',  // full range always
-    patterns: ['climb', 'surge', 'wave'],  // unpredictable
-    min: 0.5,   // seconds - quick hit
-    max: 1.2,   // brief burst of pleasure
+    metapattern: 'close_down',
+    patterns: ['descend', 'surge', 'wave'],
+    min: 0.5,
+    max: 1.2,
   },
   patternSwitch: {
-    minInstances: 4,
-    maxInstances: 12,
+    minInstances: 8,
+    maxInstances: 16,
   },
 };
 
@@ -199,6 +241,10 @@ export function loadSettings() {
     const s = migrateSettings(urlConfig.settings);
     return {
       rewardText: s.rewardText || DEFAULT_SETTINGS.rewardText,
+      petName: s.petName || DEFAULT_SETTINGS.petName,
+      pronounProgression: s.pronounProgression ?? DEFAULT_SETTINGS.pronounProgression,
+      clickerEnabled: s.clickerEnabled ?? DEFAULT_SETTINGS.clickerEnabled,
+      promptsEnabled: s.promptsEnabled ?? DEFAULT_SETTINGS.promptsEnabled,
       sessionDuration: s.sessionDuration || DEFAULT_SETTINGS.sessionDuration,
       intensity: { ...DEFAULT_SETTINGS.intensity, ...s.intensity },
       delay: { ...DEFAULT_SETTINGS.delay, ...s.delay },
@@ -213,6 +259,10 @@ export function loadSettings() {
       const parsed = migrateSettings(JSON.parse(stored));
       return {
         rewardText: parsed.rewardText || DEFAULT_SETTINGS.rewardText,
+        petName: parsed.petName || DEFAULT_SETTINGS.petName,
+        pronounProgression: parsed.pronounProgression ?? DEFAULT_SETTINGS.pronounProgression,
+        clickerEnabled: parsed.clickerEnabled ?? DEFAULT_SETTINGS.clickerEnabled,
+        promptsEnabled: parsed.promptsEnabled ?? DEFAULT_SETTINGS.promptsEnabled,
         sessionDuration: parsed.sessionDuration || DEFAULT_SETTINGS.sessionDuration,
         intensity: { ...DEFAULT_SETTINGS.intensity, ...parsed.intensity },
         delay: { ...DEFAULT_SETTINGS.delay, ...parsed.delay },
@@ -315,13 +365,16 @@ function getSessionProgress(session) {
 }
 
 /**
- * Apply metapattern to scale effective max
+ * Apply session arc to get effective min/max range
  */
-function applyMetapattern(metapatternName, min, max, sessionProgress) {
-  const metaFn = METAPATTERNS[metapatternName] || METAPATTERNS.constant;
-  const scale = metaFn(sessionProgress);
-  const effectiveMax = min + (max - min) * scale;
-  return { min, max: effectiveMax };
+function applySessionArc(arcName, min, max, sessionProgress) {
+  const arcFn = SESSION_ARCS[arcName] || SESSION_ARCS.constant;
+  const normalized = arcFn(sessionProgress);
+  const range = max - min;
+  return {
+    min: min + range * normalized.min,
+    max: min + range * normalized.max,
+  };
 }
 
 /**
@@ -330,20 +383,20 @@ function applyMetapattern(metapatternName, min, max, sessionProgress) {
 export function getNextValues(settings, session) {
   const progress = getSessionProgress(session);
 
-  // Apply metapatterns to get effective ranges
-  const intensityRange = applyMetapattern(
+  // Apply session arcs to get effective ranges
+  const intensityRange = applySessionArc(
     settings.intensity.metapattern,
     settings.intensity.min,
     settings.intensity.max,
     progress
   );
-  const delayRange = applyMetapattern(
+  const delayRange = applySessionArc(
     settings.delay.metapattern,
     settings.delay.min * 1000,
     settings.delay.max * 1000,
     progress
   );
-  const rewardRange = applyMetapattern(
+  const rewardRange = applySessionArc(
     settings.reward.metapattern,
     settings.reward.min * 1000,
     settings.reward.max * 1000,
@@ -396,4 +449,75 @@ export function getPatternLength(patternName) {
   return (PATTERNS[patternName] || PATTERNS.constant).length;
 }
 
-export { PATTERNS, METAPATTERNS, DEFAULT_SETTINGS };
+/**
+ * Transform a prompt from first-person to third-person using pet name
+ * "I obey" → "Puppet obeys", "Use me" → "Use Puppet"
+ */
+export function transformPrompt(prompt, petName) {
+  let result = prompt;
+
+  // Handle "I am" / "I'm" first (before general "I" replacement)
+  result = result.replace(/^I am\b/i, `${petName} is`);
+  result = result.replace(/^I'm\b/i, `${petName} is`);
+
+  // Handle "I [verb]" at start - need to add 's' to verb for third person
+  if (/^I [a-z]/i.test(result)) {
+    result = result.replace(/^I ([a-z]+)/i, (match, verb) => {
+      // Conjugate to third person singular
+      const conjugated = conjugateVerb(verb);
+      return `${petName} ${conjugated}`;
+    });
+  }
+
+  // Replace "me" as object pronoun (but not in words like "some", "time")
+  result = result.replace(/\bme\b/gi, petName);
+
+  // Replace "my" with petName's
+  result = result.replace(/\bmy\b/gi, `${petName}'s`);
+
+  return result;
+}
+
+/**
+ * Conjugate verb to third person singular
+ */
+function conjugateVerb(verb) {
+  const lower = verb.toLowerCase();
+
+  // Irregular verbs
+  if (lower === 'am') return 'is';
+  if (lower === 'have') return 'has';
+  if (lower === 'do') return 'does';
+  if (lower === 'go') return 'goes';
+
+  // Verbs ending in consonant + y → ies
+  if (/[^aeiou]y$/i.test(lower)) {
+    return lower.slice(0, -1) + 'ies';
+  }
+
+  // Verbs ending in s, x, z, ch, sh → es
+  if (/(?:s|x|z|ch|sh)$/i.test(lower)) {
+    return lower + 'es';
+  }
+
+  // Default: add 's'
+  return lower + 's';
+}
+
+/**
+ * Get all valid versions of a prompt for speech matching
+ */
+export function getPromptVariants(prompt, petName, pronounProgression) {
+  const variants = [prompt.toLowerCase()];
+
+  if (pronounProgression && petName) {
+    const transformed = transformPrompt(prompt, petName).toLowerCase();
+    if (transformed !== prompt.toLowerCase()) {
+      variants.push(transformed);
+    }
+  }
+
+  return variants;
+}
+
+export { PATTERNS, SESSION_ARCS, DEFAULT_SETTINGS };

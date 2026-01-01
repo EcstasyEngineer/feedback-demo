@@ -276,6 +276,23 @@
       border-color: #00d4ff;
     }
 
+    .prompt-preview {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+      padding-left: 2px;
+      font-style: italic;
+      display: none;
+    }
+
+    .prompt-preview.visible {
+      display: block;
+    }
+
+    .prompt-preview span {
+      color: #9966ff;
+    }
+
     .delete-prompt {
       background: #ff4466;
       color: #fff;
@@ -408,6 +425,91 @@
       background: #444;
       color: #fff;
     }
+
+    .visualize-btn { background: #9966ff; color: #fff; }
+
+    /* Visualization Modal */
+    .viz-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 200;
+    }
+
+    .viz-modal.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .viz-content {
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 24px;
+      width: 95%;
+      max-width: 900px;
+    }
+
+    .viz-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .viz-header h2 {
+      color: #fff;
+      margin: 0;
+    }
+
+    .viz-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .viz-regenerate {
+      background: #333;
+      color: #fff;
+      padding: 8px 16px;
+    }
+
+    .viz-close {
+      background: #00d4ff;
+      color: #000;
+      padding: 8px 16px;
+    }
+
+    #vizCanvas {
+      width: 100%;
+      height: 300px;
+      background: #0a0a12;
+      border-radius: 8px;
+      border: 1px solid #333;
+    }
+
+    .viz-legend {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+
+    .legend-intensity { color: #00ff88; }
+    .legend-delay { color: #00d4ff; }
+    .legend-reward { color: #ff6b6b; }
+
+    .viz-stats {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -449,34 +551,54 @@
         <button class="close-btn" id="closeSettingsBtn">Done</button>
       </div>
 
-      <div class="settings-group">
-        <label>Reward Text</label>
-        <input type="text" id="rewardText" value="Good Puppet" placeholder="Good Puppet">
+      <h3 style="margin: 0 0 12px; color: #888;">Prompts</h3>
+      <div class="prompt-list" id="promptList">
+        <!-- Populated by JS -->
+      </div>
+      <div class="settings-actions" style="margin-bottom: 16px;">
+        <button class="add-btn" id="addPromptBtn">+ Add</button>
       </div>
 
-      <h3 style="margin: 16px 0 12px; color: #888;">Pattern Switching</h3>
       <div class="settings-row">
         <div class="settings-group">
-          <label>Min instances before switch</label>
-          <input type="number" id="switchMin" min="1" max="50" value="4">
+          <label>Reward Text</label>
+          <input type="text" id="rewardText" value="Good Puppet" placeholder="Good Puppet">
         </div>
         <div class="settings-group">
-          <label>Max instances before switch</label>
-          <input type="number" id="switchMax" min="1" max="50" value="12">
+          <label>Pet Name</label>
+          <input type="text" id="petName" value="Puppet" placeholder="Puppet">
+        </div>
+        <div class="settings-group">
+          <label>Session Duration (min)</label>
+          <input type="number" id="settingsDuration" min="1" max="120" value="10">
         </div>
       </div>
-      <div class="hint" style="margin-bottom: 12px;">When multiple patterns selected, randomly switches after this many prompts</div>
+      <div class="settings-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="pronounProgression" checked>
+          Pronoun progression (I → Pet Name over session)
+        </label>
+        <div class="hint">Gradually shifts "I obey" → "Puppet obeys" as session progresses</div>
+      </div>
+
+      <h3 style="margin: 16px 0 12px; color: #888;">Conditioning</h3>
+      <div class="settings-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="clickerEnabled">
+          Clicker sound
+        </label>
+        <div class="hint">Plays a click sound with each reward (pairs click with vibration)</div>
+      </div>
+      <div class="settings-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="promptsEnabled" checked>
+          Prompts enabled
+        </label>
+        <div class="hint">When off, runs auto clicker+vibe on timer (loading/pairing mode)</div>
+      </div>
 
       <h3 style="margin: 16px 0 12px; color: #888;">Intensity</h3>
       <div class="settings-row">
-        <div class="settings-group">
-          <label>Session Arc</label>
-          <select id="intensityMeta">
-            <option value="constant">Constant</option>
-            <option value="climb">Climb</option>
-            <option value="descent">Descent</option>
-          </select>
-        </div>
         <div class="settings-group">
           <label>Min %</label>
           <input type="number" id="intensityMin" min="1" max="100" value="10">
@@ -485,46 +607,32 @@
           <label>Max %</label>
           <input type="number" id="intensityMax" min="1" max="100" value="70">
         </div>
-      </div>
-      <div class="settings-group">
-        <label>Patterns <button class="select-all-btn" data-target="intensityPatterns">All</button></label>
-        <div class="pattern-checkboxes" id="intensityPatterns"></div>
-      </div>
-
-      <h3 style="margin: 16px 0 12px; color: #888;">Delay Between Prompts</h3>
-      <div class="settings-row">
         <div class="settings-group">
           <label>Session Arc</label>
-          <select id="delayMeta">
-            <option value="constant">Constant</option>
-            <option value="climb" selected>Climb</option>
-            <option value="descent">Descent</option>
+          <select id="intensityMeta">
+            <option value="constant">Full range</option>
+            <option value="open_up">Open up</option>
+            <option value="close_down">Close down</option>
+            <option value="open_down">Open down</option>
+            <option value="close_up">Close up</option>
+            <option value="slide_up_wide">Slide up (wide)</option>
+            <option value="slide_up">Slide up</option>
+            <option value="slide_up_narrow">Slide up (narrow)</option>
+            <option value="slide_down_wide">Slide down (wide)</option>
+            <option value="slide_down">Slide down</option>
+            <option value="slide_down_narrow">Slide down (narrow)</option>
+            <option value="focus_high">Focus high</option>
+            <option value="focus_low">Focus low</option>
           </select>
-        </div>
-        <div class="settings-group">
-          <label>Min (s)</label>
-          <input type="number" id="delayMin" min="0.1" max="60" step="0.1" value="4">
-        </div>
-        <div class="settings-group">
-          <label>Max (s)</label>
-          <input type="number" id="delayMax" min="0.1" max="60" step="0.1" value="12">
         </div>
       </div>
       <div class="settings-group">
-        <label>Patterns <button class="select-all-btn" data-target="delayPatterns">All</button></label>
-        <div class="pattern-checkboxes" id="delayPatterns"></div>
+        <label>Variation <button class="select-all-btn" data-target="intensityPatterns">All</button></label>
+        <div class="pattern-checkboxes" id="intensityPatterns"></div>
       </div>
 
       <h3 style="margin: 16px 0 12px; color: #888;">Reward Duration</h3>
       <div class="settings-row">
-        <div class="settings-group">
-          <label>Session Arc</label>
-          <select id="rewardMeta">
-            <option value="constant">Constant</option>
-            <option value="climb">Climb</option>
-            <option value="descent">Descent</option>
-          </select>
-        </div>
         <div class="settings-group">
           <label>Min (s)</label>
           <input type="number" id="rewardMin" min="0.1" max="30" step="0.1" value="0.5">
@@ -533,22 +641,101 @@
           <label>Max (s)</label>
           <input type="number" id="rewardMax" min="0.1" max="30" step="0.1" value="1.2">
         </div>
+        <div class="settings-group">
+          <label>Session Arc</label>
+          <select id="rewardMeta">
+            <option value="constant">Full range</option>
+            <option value="open_up">Open up</option>
+            <option value="close_down">Close down</option>
+            <option value="open_down">Open down</option>
+            <option value="close_up">Close up</option>
+            <option value="slide_up_wide">Slide up (wide)</option>
+            <option value="slide_up">Slide up</option>
+            <option value="slide_up_narrow">Slide up (narrow)</option>
+            <option value="slide_down_wide">Slide down (wide)</option>
+            <option value="slide_down">Slide down</option>
+            <option value="slide_down_narrow">Slide down (narrow)</option>
+            <option value="focus_high">Focus high</option>
+            <option value="focus_low">Focus low</option>
+          </select>
+        </div>
       </div>
       <div class="settings-group">
-        <label>Patterns <button class="select-all-btn" data-target="rewardPatterns">All</button></label>
+        <label>Variation <button class="select-all-btn" data-target="rewardPatterns">All</button></label>
         <div class="pattern-checkboxes" id="rewardPatterns"></div>
       </div>
 
-      <h3 style="margin: 16px 0 12px; color: #888;">Prompts</h3>
-      <div class="prompt-list" id="promptList">
-        <!-- Populated by JS -->
+      <h3 style="margin: 16px 0 12px; color: #888;">Delay Between Prompts</h3>
+      <div class="settings-row">
+        <div class="settings-group">
+          <label>Min (s)</label>
+          <input type="number" id="delayMin" min="0.1" max="60" step="0.1" value="4">
+        </div>
+        <div class="settings-group">
+          <label>Max (s)</label>
+          <input type="number" id="delayMax" min="0.1" max="60" step="0.1" value="12">
+        </div>
+        <div class="settings-group">
+          <label>Session Arc</label>
+          <select id="delayMeta">
+            <option value="constant">Full range</option>
+            <option value="open_up" selected>Open up</option>
+            <option value="close_down">Close down</option>
+            <option value="open_down">Open down</option>
+            <option value="close_up">Close up</option>
+            <option value="slide_up_wide">Slide up (wide)</option>
+            <option value="slide_up">Slide up</option>
+            <option value="slide_up_narrow">Slide up (narrow)</option>
+            <option value="slide_down_wide">Slide down (wide)</option>
+            <option value="slide_down">Slide down</option>
+            <option value="slide_down_narrow">Slide down (narrow)</option>
+            <option value="focus_high">Focus high</option>
+            <option value="focus_low">Focus low</option>
+          </select>
+        </div>
+      </div>
+      <div class="settings-group">
+        <label>Variation <button class="select-all-btn" data-target="delayPatterns">All</button></label>
+        <div class="pattern-checkboxes" id="delayPatterns"></div>
       </div>
 
-      <div class="settings-actions">
-        <button class="add-btn" id="addPromptBtn">+ Add</button>
+      <h3 style="margin: 16px 0 12px; color: #666; font-size: 0.9em;">Advanced</h3>
+      <div class="settings-row">
+        <div class="settings-group">
+          <label>Min cycles before pattern switch</label>
+          <input type="number" id="switchMin" min="1" max="50" value="4">
+        </div>
+        <div class="settings-group">
+          <label>Max cycles before pattern switch</label>
+          <input type="number" id="switchMax" min="1" max="50" value="12">
+        </div>
+      </div>
+
+      <div class="settings-actions" style="margin-top: 16px;">
         <button class="reset-btn" id="resetPromptsBtn">Reset All</button>
         <button class="share-btn" id="shareBtn">Copy Share Link</button>
+        <button class="visualize-btn" id="visualizeBtn">Visualize</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Visualization Modal -->
+  <div class="viz-modal" id="vizModal">
+    <div class="viz-content">
+      <div class="viz-header">
+        <h2>Session Preview</h2>
+        <div class="viz-controls">
+          <button class="viz-regenerate" id="vizRegenerate">↻ Regenerate</button>
+          <button class="viz-close" id="vizClose">Done</button>
+        </div>
+      </div>
+      <canvas id="vizCanvas" width="800" height="300"></canvas>
+      <div class="viz-legend">
+        <span class="legend-intensity">● Intensity</span>
+        <span class="legend-delay">● Delay</span>
+        <span class="legend-reward">● Reward</span>
+      </div>
+      <div class="viz-stats" id="vizStats"></div>
     </div>
   </div>
 
