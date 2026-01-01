@@ -2,7 +2,7 @@
   "_source": "https://github.com/buttplugio/buttplug",
   "_license": "BSD-3-Clause (Nonpolynomial Labs LLC)",
   "_version": "4.148",
-  "_updated": "2026-01-01T03:05:27.487Z",
+  "_updated": "2026-01-01T11:40:20.491Z",
   "filters": [
     {
       "name": "116"
@@ -1979,10 +1979,22 @@
       "name": "火箭X7"
     },
     {
+      "namePrefix": "47L"
+    },
+    {
       "namePrefix": "Aogu BLE "
     },
     {
       "namePrefix": "CCYB_"
+    },
+    {
+      "namePrefix": "Coyote"
+    },
+    {
+      "namePrefix": "D-LAB ESTIM"
+    },
+    {
+      "namePrefix": "DG-LAB"
     },
     {
       "namePrefix": "Eropair "
@@ -2055,6 +2067,7 @@
     "00001523-1212-efde-1523-785feabcd123",
     "00001802-0000-1000-8000-00805f9b34fb",
     "0000180a-0000-1000-8000-00805f9b34fb",
+    "0000180c-0000-1000-8000-00805f9b34fb",
     "0000180f-0000-1000-8000-00805f9b34fb",
     "00001900-0000-1000-8000-00805f9b34fb",
     "00006000-0000-1000-8000-00805f9b34fb",
@@ -2135,6 +2148,8 @@
     "88f80580-0000-01e6-aace-0002a5d5c51b",
     "88f82580-0000-01e6-aace-0002a5d5c51b",
     "8e7c6065-7656-17ad-1b41-b53d1a548e0d",
+    "955a180a-0fe2-f5aa-a094-84b8d4f3e8ad",
+    "955a180b-0fe2-f5aa-a094-84b8d4f3e8ad",
     "a0d70001-4c16-4ba7-977a-d394920e13a3",
     "b75c49d2-04a3-4071-a0b5-35853eb08307",
     "d973f2e5-b19e-11e2-9e96-0800200c9a66",
