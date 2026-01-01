@@ -10,7 +10,8 @@ import { connect as connectVibrator } from './haptic/vibrator.js';
 import { SpeechListener, fuzzyMatch, isSupported as speechSupported } from './speech/recognition.js';
 import {
   loadPrompts, savePrompts, resetPrompts, generateShareUrl, isSharedConfig, DEFAULT_PROMPTS,
-  loadSettings, saveSettings, resetSettings, createSession, getNextValues, PATTERNS, onUrlChange
+  loadSettings, saveSettings, resetSettings, createSession, getNextValues, isSessionComplete,
+  PATTERNS, METAPATTERNS, onUrlChange
 } from './config.js';
 
 // ============================================================================
@@ -38,15 +39,21 @@ const addPromptBtn = document.getElementById('addPromptBtn');
 const resetPromptsBtn = document.getElementById('resetPromptsBtn');
 const shareBtn = document.getElementById('shareBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const startModal = document.getElementById('startModal');
+const startSessionBtn = document.getElementById('startSessionBtn');
 
 // Session settings elements
 const rewardTextInput = document.getElementById('rewardText');
+const sessionDurationInput = document.getElementById('sessionDuration');
+const intensityMeta = document.getElementById('intensityMeta');
 const intensityPatterns = document.getElementById('intensityPatterns');
 const intensityMin = document.getElementById('intensityMin');
 const intensityMax = document.getElementById('intensityMax');
+const delayMeta = document.getElementById('delayMeta');
 const delayPatterns = document.getElementById('delayPatterns');
 const delayMin = document.getElementById('delayMin');
 const delayMax = document.getElementById('delayMax');
+const rewardMeta = document.getElementById('rewardMeta');
 const rewardPatterns = document.getElementById('rewardPatterns');
 const rewardMin = document.getElementById('rewardMin');
 const rewardMax = document.getElementById('rewardMax');
@@ -112,12 +119,15 @@ function renderSettings() {
   if (rewardTextInput) rewardTextInput.value = settings.rewardText;
   if (switchMin) switchMin.value = settings.patternSwitch.minInstances;
   if (switchMax) switchMax.value = settings.patternSwitch.maxInstances;
+  if (intensityMeta) intensityMeta.value = settings.intensity.metapattern;
   if (intensityMin) intensityMin.value = Math.round(settings.intensity.min * 100);
   if (intensityMax) intensityMax.value = Math.round(settings.intensity.max * 100);
   setPatternCheckboxes(intensityPatterns, settings.intensity.patterns);
+  if (delayMeta) delayMeta.value = settings.delay.metapattern;
   if (delayMin) delayMin.value = settings.delay.min;
   if (delayMax) delayMax.value = settings.delay.max;
   setPatternCheckboxes(delayPatterns, settings.delay.patterns);
+  if (rewardMeta) rewardMeta.value = settings.reward.metapattern;
   if (rewardMin) rewardMin.value = settings.reward.min;
   if (rewardMax) rewardMax.value = settings.reward.max;
   setPatternCheckboxes(rewardPatterns, settings.reward.patterns);
@@ -194,18 +204,24 @@ function isConstantOnly(patterns) {
   return patterns.length === 1 && patterns[0] === 'constant';
 }
 
+function shouldGreyOutMin(metapattern, patterns) {
+  // Only grey out min when BOTH metapattern and micro pattern are constant
+  // (that's the only case where min is irrelevant - value is always max)
+  return metapattern === 'constant' && isConstantOnly(patterns);
+}
+
 function updateFieldStates() {
-  // Grey out min fields when only constant pattern is selected (constant uses max)
+  // Grey out min fields when both metapattern and micro pattern are constant
   if (intensityMin) {
-    intensityMin.disabled = isConstantOnly(settings.intensity.patterns);
+    intensityMin.disabled = shouldGreyOutMin(settings.intensity.metapattern, settings.intensity.patterns);
     intensityMin.style.opacity = intensityMin.disabled ? '0.4' : '1';
   }
   if (delayMin) {
-    delayMin.disabled = isConstantOnly(settings.delay.patterns);
+    delayMin.disabled = shouldGreyOutMin(settings.delay.metapattern, settings.delay.patterns);
     delayMin.style.opacity = delayMin.disabled ? '0.4' : '1';
   }
   if (rewardMin) {
-    rewardMin.disabled = isConstantOnly(settings.reward.patterns);
+    rewardMin.disabled = shouldGreyOutMin(settings.reward.metapattern, settings.reward.patterns);
     rewardMin.style.opacity = rewardMin.disabled ? '0.4' : '1';
   }
 }
@@ -214,12 +230,15 @@ function handleSettingsChange() {
   settings.rewardText = rewardTextInput?.value || 'Good Puppet';
   settings.patternSwitch.minInstances = Math.max(1, parseInt(switchMin?.value) || 4);
   settings.patternSwitch.maxInstances = Math.max(1, parseInt(switchMax?.value) || 12);
+  settings.intensity.metapattern = intensityMeta?.value || 'constant';
   settings.intensity.patterns = getSelectedPatterns(intensityPatterns);
   settings.intensity.min = Math.max(0.01, Math.min(1, (parseInt(intensityMin?.value) || 30) / 100));
   settings.intensity.max = Math.max(0.01, Math.min(1, (parseInt(intensityMax?.value) || 100) / 100));
+  settings.delay.metapattern = delayMeta?.value || 'constant';
   settings.delay.patterns = getSelectedPatterns(delayPatterns);
   settings.delay.min = Math.max(0.1, parseFloat(delayMin?.value) || 1);
   settings.delay.max = Math.max(0.1, parseFloat(delayMax?.value) || 3);
+  settings.reward.metapattern = rewardMeta?.value || 'constant';
   settings.reward.patterns = getSelectedPatterns(rewardPatterns);
   settings.reward.min = Math.max(0.1, parseFloat(rewardMin?.value) || 2);
   settings.reward.max = Math.max(0.1, parseFloat(rewardMax?.value) || 4);
@@ -353,6 +372,12 @@ async function runSequence() {
 
   try {
     while (isRunning) {
+      // Check if session duration has elapsed
+      if (isSessionComplete(session)) {
+        setStatus('Session complete!', 'success');
+        showFeedback('Session Complete', true);
+        break;
+      }
 
       const promptText = validPrompts[currentPromptIndex];
       listener = new SpeechListener();
@@ -368,11 +393,12 @@ async function runSequence() {
       console.log('Match result:', result);
 
       if (result.match) {
-        const { intensity, delay, reward } = getNextValues(settings, session);
+        const { intensity, delay, reward, progress } = getNextValues(settings, session);
 
         showFeedback(settings.rewardText, true);
-        setStatus(`Matched! ${Math.round(intensity * 100)}% for ${(reward / 1000).toFixed(1)}s`, 'success');
-        console.log(`Intensity: ${Math.round(intensity * 100)}%, Reward: ${reward}ms, Next delay: ${delay}ms`);
+        const progressPct = Math.round(progress * 100);
+        setStatus(`${progressPct}% | ${Math.round(intensity * 100)}% for ${(reward / 1000).toFixed(1)}s`, 'success');
+        console.log(`Progress: ${progressPct}%, Intensity: ${Math.round(intensity * 100)}%, Reward: ${reward}ms, Next delay: ${delay}ms`);
 
         await device.activate(intensity);
         await new Promise(r => setTimeout(r, reward));
@@ -396,6 +422,7 @@ async function runSequence() {
   } finally {
     isRunning = false;
     session = null;
+    document.body.classList.remove('session-active');
     startBtn.textContent = 'Start';
     promptEl.classList.remove('visible');
     feedbackEl.classList.remove('visible');
@@ -408,17 +435,45 @@ function stopSequence() {
     listener.cancel();
   }
   device?.stop();
+  document.body.classList.remove('session-active');
   startBtn.textContent = 'Start';
   promptEl.classList.remove('visible');
   feedbackEl.classList.remove('visible');
   setStatus('Stopped', 'info');
 }
 
+async function showStartModal() {
+  // Pre-init speech recognition to get mic permission early
+  if (speechSupported()) {
+    try {
+      const testListener = new SpeechListener();
+      await testListener.listen().catch(() => {});
+      testListener.cancel();
+    } catch (e) { /* ignore */ }
+  }
+  sessionDurationInput.value = Math.round(settings.sessionDuration / 60);
+  startModal.classList.add('visible');
+  sessionDurationInput.focus();
+  sessionDurationInput.select();
+}
+
+function hideStartModal() {
+  startModal.classList.remove('visible');
+}
+
+function beginSession() {
+  settings.sessionDuration = Math.max(60, (parseInt(sessionDurationInput?.value) || 10) * 60);
+  saveSettings(settings);
+  hideStartModal();
+  document.body.classList.add('session-active');
+  runSequence();
+}
+
 function handleStartStop() {
   if (isRunning) {
     stopSequence();
   } else {
-    runSequence();
+    showStartModal();
   }
 }
 
@@ -442,6 +497,15 @@ settingsPanel?.addEventListener('click', (e) => {
   // Close if clicking the backdrop (not the content)
   if (e.target === settingsPanel) closeSettings();
 });
+startModal?.addEventListener('click', (e) => {
+  // Close if clicking the backdrop (not the content)
+  if (e.target === startModal) hideStartModal();
+});
+startSessionBtn?.addEventListener('click', beginSession);
+sessionDurationInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') beginSession();
+  if (e.key === 'Escape') hideStartModal();
+});
 addPromptBtn?.addEventListener('click', handleAddPrompt);
 resetPromptsBtn?.addEventListener('click', handleReset);
 shareBtn?.addEventListener('click', handleShare);
@@ -449,7 +513,7 @@ settingsPanel?.addEventListener('click', handleSelectAll);
 promptList?.addEventListener('input', handlePromptChange);
 promptList?.addEventListener('click', handleDeletePrompt);
 
-// Settings change listeners - use blur for text/number inputs, change for checkboxes
+// Settings change listeners - use blur for text/number inputs, change for selects/checkboxes
 [intensityPatterns, delayPatterns, rewardPatterns].forEach(container => {
   container?.addEventListener('change', (e) => {
     if (e.target.type === 'checkbox') {
@@ -457,6 +521,9 @@ promptList?.addEventListener('click', handleDeletePrompt);
       handleSettingsChange();
     }
   });
+});
+[intensityMeta, delayMeta, rewardMeta].forEach(el => {
+  el?.addEventListener('change', handleSettingsChange);
 });
 [rewardTextInput, switchMin, switchMax, intensityMin, intensityMax, delayMin, delayMax, rewardMin, rewardMax].forEach(el => {
   el?.addEventListener('blur', handleSettingsChange);
