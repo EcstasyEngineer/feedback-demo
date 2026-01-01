@@ -414,7 +414,7 @@ async function handleConnect() {
 async function handleTest() {
   if (!device) return;
   try {
-    const intensity = settings.intensity.min;
+    const intensity = 0.10;  // Fixed 10% for safety testing
     setStatus(`Testing vibe at ${Math.round(intensity * 100)}%...`, 'info');
     await device.send(intensity);
     setStatus('Vibe ON', 'success');
@@ -519,12 +519,14 @@ async function runSequence() {
             await device.activate(intensity);
             await new Promise(r => setTimeout(r, reward));
             await device.stop();
+            await new Promise(r => setTimeout(r, 50));  // Let device settle after stop
           } else {
             await new Promise(r => setTimeout(r, reward));  // still wait reward duration
           }
 
           currentPromptIndex = (currentPromptIndex + 1) % validPrompts.length;
 
+          // Delay starts AFTER reward/stim finishes
           if (!isRunning) break;
           await new Promise(r => setTimeout(r, delay));
         } else {
@@ -553,10 +555,12 @@ async function runSequence() {
           await device.activate(intensity);
           await new Promise(r => setTimeout(r, reward));
           await device.stop();
+          await new Promise(r => setTimeout(r, 50));  // Let device settle after stop
         } else {
           await new Promise(r => setTimeout(r, reward));  // still wait reward duration
         }
 
+        // Delay starts AFTER reward/stim finishes
         if (!isRunning) break;
         await new Promise(r => setTimeout(r, delay));
       }

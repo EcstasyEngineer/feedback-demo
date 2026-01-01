@@ -44,6 +44,17 @@ for (const protocol of Object.values(config.protocols)) {
   }
 }
 
+// Add Coyote (DG-Lab e-stim) - not in buttplug due to liability
+// V3
+names.add(JSON.stringify({ namePrefix: 'D-LAB ESTIM' }));
+names.add(JSON.stringify({ namePrefix: 'DG-LAB' }));
+names.add(JSON.stringify({ namePrefix: '47L' }));
+names.add(JSON.stringify({ namePrefix: 'Coyote' }));
+services.add('0000180c-0000-1000-8000-00805f9b34fb');  // V3 Control
+// V2 (two service variants - B has writable chars)
+services.add('955a180a-0fe2-f5aa-a094-84b8d4f3e8ad');  // V2 Service A (read-only)
+services.add('955a180b-0fe2-f5aa-a094-84b8d4f3e8ad');  // V2 Service B (writable)
+
 const filters = [...names].sort().map(n => JSON.parse(n));
 const serviceList = [...services].sort();
 
