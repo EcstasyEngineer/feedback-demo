@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feedback Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0a0a12;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .controls {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    button:hover:not(:disabled) {
+      filter: brightness(1.1);
+    }
+
+    .connect-btn { background: #00d4ff; color: #000; }
+    .start-btn { background: #00ff88; color: #000; }
+    .test-btn { background: #ff0; color: #000; }
+    .settings-btn { background: #666; color: #fff; }
+
+    .status {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #1a1a2e;
+      border: 1px solid #333;
+    }
+
+    .status.success { border-color: #00ff88; color: #00ff88; }
+    .status.error { border-color: #ff4466; color: #ff4466; }
+
+    .prompt, .feedback {
+      font-size: clamp(2rem, 10vw, 5rem);
+      font-weight: bold;
+      text-align: center;
+      opacity: 0;
+      transform: scale(0.9);
+      transition: all 0.3s ease;
+    }
+
+    .prompt.visible, .feedback.visible {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .prompt { color: #00d4ff; }
+    .feedback.success { color: #00ff88; text-shadow: 0 0 40px rgba(0, 255, 136, 0.5); }
+    .feedback.fail { color: #ff4466; }
+
+    .info {
+      position: fixed;
+      bottom: 20px;
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }
+
+    .info code {
+      background: #1a1a2e;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    /* Settings Panel */
+    .settings-panel {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 100;
+    }
+
+    .settings-panel.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .settings-content {
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 24px;
+      width: 90%;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .settings-header h2 {
+      font-size: 1.5rem;
+      color: #fff;
+    }
+
+    .close-btn {
+      background: #00d4ff;
+      color: #000;
+      font-size: 14px;
+      padding: 8px 16px;
+    }
+
+    .prompt-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .prompt-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .prompt-row input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #0a0a12;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    .prompt-row input:focus {
+      outline: none;
+      border-color: #00d4ff;
+    }
+
+    .delete-prompt {
+      background: #ff4466;
+      color: #fff;
+      padding: 8px 14px;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .settings-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .settings-actions button {
+      flex: 1;
+      min-width: 120px;
+    }
+
+    .add-btn { background: #00d4ff; color: #000; }
+    .reset-btn { background: #ff4466; color: #fff; }
+    .share-btn { background: #00ff88; color: #000; }
+
+    /* Session settings */
+    .settings-group {
+      margin-bottom: 12px;
+    }
+
+    .settings-group label {
+      display: block;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 4px;
+    }
+
+    .settings-group select,
+    .settings-group input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #0a0a12;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    .settings-group select:focus,
+    .settings-group input:focus {
+      outline: none;
+      border-color: #00d4ff;
+    }
+
+    .settings-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .settings-row .settings-group {
+      flex: 1;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .pattern-checkboxes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .pattern-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: #0a0a12;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .pattern-checkbox:hover {
+      border-color: #00d4ff;
+    }
+
+    .pattern-checkbox.checked {
+      border-color: #00d4ff;
+      background: rgba(0, 212, 255, 0.1);
+    }
+
+    .pattern-checkbox input {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+    }
+
+    .select-all-btn {
+      font-size: 10px;
+      padding: 2px 6px;
+      margin-left: 8px;
+      background: #333;
+      color: #888;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: pointer;
+      vertical-align: middle;
+    }
+
+    .select-all-btn:hover {
+      background: #444;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button class="connect-btn" id="connectBtn">Connect Device</button>
+    <button class="start-btn" id="startBtn" disabled>Start</button>
+    <button class="test-btn" id="testBtn" disabled>Test Vibe</button>
+    <button class="settings-btn" id="settingsBtn">Settings</button>
+  </div>
+
+  <div class="status" id="status">Initializing...</div>
+
+  <div class="prompt" id="prompt"></div>
+  <div class="feedback" id="feedback"></div>
+
+  <div class="info">
+    For offline speech: <code>chrome://settings/accessibility</code> → Enable Live Caption
+  </div>
+
+  <!-- Settings Panel -->
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-content">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button class="close-btn" id="closeSettingsBtn">Done</button>
+      </div>
+
+      <div class="settings-group">
+        <label>Reward Text</label>
+        <input type="text" id="rewardText" value="Good Puppet" placeholder="Good Puppet">
+      </div>
+
+      <h3 style="margin: 16px 0 12px; color: #888;">Pattern Switching</h3>
+      <div class="settings-row">
+        <div class="settings-group">
+          <label>Min instances before switch</label>
+          <input type="number" id="switchMin" min="1" max="50" value="4">
+        </div>
+        <div class="settings-group">
+          <label>Max instances before switch</label>
+          <input type="number" id="switchMax" min="1" max="50" value="12">
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom: 12px;">When multiple patterns selected, randomly switches after this many prompts</div>
+
+      <h3 style="margin: 16px 0 12px; color: #888;">Intensity</h3>
+      <div class="settings-row">
+        <div class="settings-group">
+          <label>Min %</label>
+          <input type="number" id="intensityMin" min="1" max="100" value="10">
+        </div>
+        <div class="settings-group">
+          <label>Max %</label>
+          <input type="number" id="intensityMax" min="1" max="100" value="70">
+        </div>
+      </div>
+      <div class="settings-group">
+        <label>Patterns <button class="select-all-btn" data-target="intensityPatterns">All</button></label>
+        <div class="pattern-checkboxes" id="intensityPatterns"></div>
+      </div>
+
+      <h3 style="margin: 16px 0 12px; color: #888;">Delay Between Prompts</h3>
+      <div class="settings-row">
+        <div class="settings-group">
+          <label>Min (s)</label>
+          <input type="number" id="delayMin" min="0.1" max="60" step="0.1" value="4">
+        </div>
+        <div class="settings-group">
+          <label>Max (s)</label>
+          <input type="number" id="delayMax" min="0.1" max="60" step="0.1" value="12">
+        </div>
+      </div>
+      <div class="settings-group">
+        <label>Patterns <button class="select-all-btn" data-target="delayPatterns">All</button></label>
+        <div class="pattern-checkboxes" id="delayPatterns"></div>
+      </div>
+
+      <h3 style="margin: 16px 0 12px; color: #888;">Reward Duration</h3>
+      <div class="settings-row">
+        <div class="settings-group">
+          <label>Min (s)</label>
+          <input type="number" id="rewardMin" min="0.1" max="30" step="0.1" value="0.5">
+        </div>
+        <div class="settings-group">
+          <label>Max (s)</label>
+          <input type="number" id="rewardMax" min="0.1" max="30" step="0.1" value="1.2">
+        </div>
+      </div>
+      <div class="settings-group">
+        <label>Patterns <button class="select-all-btn" data-target="rewardPatterns">All</button></label>
+        <div class="pattern-checkboxes" id="rewardPatterns"></div>
+      </div>
+
+      <h3 style="margin: 16px 0 12px; color: #888;">Prompts</h3>
+      <div class="prompt-list" id="promptList">
+        <!-- Populated by JS -->
+      </div>
+
+      <div class="settings-actions">
+        <button class="add-btn" id="addPromptBtn">+ Add</button>
+        <button class="reset-btn" id="resetPromptsBtn">Reset All</button>
+        <button class="share-btn" id="shareBtn">Copy Share Link</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

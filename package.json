@@ -1,0 +1,20 @@
+{
+  "name": "feedback-demo",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "update-devices": "node scripts/update-devices.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EcstasyEngineer/feedback-demo.git"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
+    "vite": "^7.3.0"
+  }
+}
