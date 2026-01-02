@@ -11,8 +11,10 @@ import { SpeechListener, fuzzyMatch, isSupported as speechSupported } from './sp
 import {
   loadPrompts, savePrompts, resetPrompts, generateShareUrl, isSharedConfig, DEFAULT_PROMPTS,
   loadSettings, saveSettings, resetSettings, createSession, getNextValues, isSessionComplete,
-  PATTERNS, SESSION_ARCS, onUrlChange, transformPrompt, getPromptVariants
+  PATTERNS, SESSION_ARCS, onUrlChange, transformPrompt, getPromptVariants,
+  exportConfig, importConfig
 } from './config.js';
+import clickerUrl from './assets/clicker.opus';
 
 // ============================================================================
 // App State
@@ -38,6 +40,8 @@ const promptList = document.getElementById('promptList');
 const addPromptBtn = document.getElementById('addPromptBtn');
 const resetPromptsBtn = document.getElementById('resetPromptsBtn');
 const shareBtn = document.getElementById('shareBtn');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 const startModal = document.getElementById('startModal');
 const startSessionBtn = document.getElementById('startSessionBtn');
@@ -64,9 +68,10 @@ const petNameInput = document.getElementById('petName');
 const pronounProgressionInput = document.getElementById('pronounProgression');
 const clickerEnabledInput = document.getElementById('clickerEnabled');
 const promptsEnabledInput = document.getElementById('promptsEnabled');
+const randomizePromptsInput = document.getElementById('randomizePrompts');
 
 // Clicker sound
-const clickerAudio = new Audio('/clicker.opus');
+const clickerAudio = new Audio(clickerUrl);
 clickerAudio.preload = 'auto';
 function playClick() {
   clickerAudio.currentTime = 0;
@@ -169,6 +174,7 @@ function renderSettings() {
   if (pronounProgressionInput) pronounProgressionInput.checked = settings.pronounProgression !== false;
   if (clickerEnabledInput) clickerEnabledInput.checked = settings.clickerEnabled === true;
   if (promptsEnabledInput) promptsEnabledInput.checked = settings.promptsEnabled !== false;
+  if (randomizePromptsInput) randomizePromptsInput.checked = settings.randomizePrompts === true;
   if (settingsDuration) settingsDuration.value = Math.round(settings.sessionDuration / 60);
   if (switchMin) switchMin.value = settings.patternSwitch.minInstances;
   if (switchMax) switchMax.value = settings.patternSwitch.maxInstances;
@@ -298,6 +304,7 @@ function handleSettingsChange() {
   settings.pronounProgression = pronounProgressionInput?.checked ?? true;
   settings.clickerEnabled = clickerEnabledInput?.checked ?? false;
   settings.promptsEnabled = promptsEnabledInput?.checked ?? true;
+  settings.randomizePrompts = randomizePromptsInput?.checked ?? false;
   settings.sessionDuration = Math.max(60, (parseInt(settingsDuration?.value) || 10) * 60);
   settings.patternSwitch.minInstances = Math.max(1, parseInt(switchMin?.value) || 4);
   settings.patternSwitch.maxInstances = Math.max(1, parseInt(switchMax?.value) || 12);
@@ -368,6 +375,45 @@ function handleShare() {
   }).catch(() => {
     prompt('Copy this link:', url);
   });
+}
+
+function handleExport() {
+  const blob = exportConfig(prompts, settings);
+  navigator.clipboard.writeText(blob).then(() => {
+    setStatus('Config copied to clipboard!', 'success');
+    setTimeout(() => setStatus('Ready', 'info'), 2000);
+  }).catch(() => {
+    prompt('Copy this config:', blob);
+  });
+}
+
+function handleImport() {
+  const blob = prompt('Paste config blob:');
+  if (!blob) return;
+
+  const config = importConfig(blob);
+  if (!config) {
+    setStatus('Invalid config blob', 'error');
+    setTimeout(() => setStatus('Ready', 'info'), 2000);
+    return;
+  }
+
+  // Apply imported config
+  prompts = config.prompts;
+  savePrompts(prompts);
+
+  if (config.settings) {
+    settings = { ...settings, ...config.settings };
+    saveSettings(settings);
+  }
+
+  // Re-render UI
+  renderPromptList();
+  renderSettings();
+  updateFieldStates();
+
+  setStatus('Config imported!', 'success');
+  setTimeout(() => setStatus('Ready', 'info'), 2000);
 }
 
 function openSettings() {
@@ -451,11 +497,25 @@ async function runSequence() {
       setStatus('No prompts configured', 'error');
       return;
     }
+
+    // Create listener once before the loop to avoid repeated permission prompts
+    listener = new SpeechListener();
   }
 
   isRunning = true;
   session = createSession(settings);
+  document.body.classList.add('session-active');
   startBtn.textContent = 'Stop';
+
+  // Prepare prompts for this session (optionally randomized)
+  let sessionPrompts = prompts.filter(p => p.trim());
+  if (settings.randomizePrompts && sessionPrompts.length > 1) {
+    // Fisher-Yates shuffle
+    for (let i = sessionPrompts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [sessionPrompts[i], sessionPrompts[j]] = [sessionPrompts[j], sessionPrompts[i]];
+    }
+  }
 
   try {
     while (isRunning) {
@@ -468,9 +528,7 @@ async function runSequence() {
 
       if (promptMode) {
         // Call-and-response mode with speech recognition
-        const validPrompts = prompts.filter(p => p.trim());
-        const basePrompt = validPrompts[currentPromptIndex];
-        listener = new SpeechListener();
+        const basePrompt = sessionPrompts[currentPromptIndex % sessionPrompts.length];
 
         // Get current progress for display (without advancing state)
         const currentProgress = (Date.now() - session.startTime) / session.duration;
@@ -524,7 +582,7 @@ async function runSequence() {
             await new Promise(r => setTimeout(r, reward));  // still wait reward duration
           }
 
-          currentPromptIndex = (currentPromptIndex + 1) % validPrompts.length;
+          currentPromptIndex = (currentPromptIndex + 1) % sessionPrompts.length;
 
           // Delay starts AFTER reward/stim finishes
           if (!isRunning) break;
@@ -573,6 +631,9 @@ async function runSequence() {
   } finally {
     isRunning = false;
     session = null;
+    if (listener) {
+      listener.stop();  // Fully stop recognition
+    }
     document.body.classList.remove('session-active');
     startBtn.textContent = 'Start';
     promptEl.classList.remove('visible');
@@ -583,7 +644,7 @@ async function runSequence() {
 function stopSequence() {
   isRunning = false;
   if (listener) {
-    listener.cancel();
+    listener.stop();  // Fully stop recognition (not just cancel)
   }
   device?.stop();
   document.body.classList.remove('session-active');
@@ -608,8 +669,7 @@ function beginSession() {
   settings.sessionDuration = Math.max(60, (parseInt(sessionDurationInput?.value) || 10) * 60);
   saveSettings(settings);
   hideStartModal();
-  document.body.classList.add('session-active');
-  runSequence();
+  runSequence();  // session-active class is added inside runSequence after validation
 }
 
 function handleStartStop() {
@@ -653,6 +713,8 @@ sessionDurationInput?.addEventListener('keydown', (e) => {
 addPromptBtn?.addEventListener('click', handleAddPrompt);
 resetPromptsBtn?.addEventListener('click', handleReset);
 shareBtn?.addEventListener('click', handleShare);
+exportBtn?.addEventListener('click', handleExport);
+importBtn?.addEventListener('click', handleImport);
 settingsPanel?.addEventListener('click', handleSelectAll);
 promptList?.addEventListener('input', handlePromptChange);
 promptList?.addEventListener('click', handleDeletePrompt);
@@ -675,6 +737,7 @@ promptList?.addEventListener('click', handleDeletePrompt);
 pronounProgressionInput?.addEventListener('change', handleSettingsChange);
 clickerEnabledInput?.addEventListener('change', handleSettingsChange);
 promptsEnabledInput?.addEventListener('change', handleSettingsChange);
+randomizePromptsInput?.addEventListener('change', handleSettingsChange);
 
 // Handle URL changes (for shared links pasted into already-open page)
 onUrlChange(() => {
