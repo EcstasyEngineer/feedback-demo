@@ -36,6 +36,7 @@ export async function checkLocalAvailable() {
 
 /**
  * Speech Listener - waits for a single utterance
+ * Reuses the same SpeechRecognition instance to avoid repeated permission prompts.
  */
 export class SpeechListener {
   constructor(options = {}) {
@@ -46,6 +47,100 @@ export class SpeechListener {
     this.lang = options.lang || 'en-US';
     this._recognition = null;
     this._listening = false;
+    this._resolve = null;
+    this._reject = null;
+    this._transcript = '';
+    this._resultIndex = 0;  // Track which results we've processed
+
+    // file:// URLs don't persist mic permissions, so keep recognition always active
+    this._isFileProtocol = window.location.protocol === 'file:';
+    this._alwaysActive = false;
+    this._recognitionRunning = false;  // Track if recognition is actually running
+
+    this._initRecognition();
+  }
+
+  _initRecognition() {
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;         // Keep listening for full phrase
+    recognition.interimResults = true;     // Get partial results (helps with offline)
+    recognition.lang = this.lang;
+
+    recognition.onresult = (event) => {
+      // Only process NEW results (from _resultIndex onward)
+      let transcript = '';
+      for (let i = this._resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      this._transcript = transcript;
+
+      // Check if we have a final result
+      const lastResult = event.results[event.results.length - 1];
+      if (lastResult.isFinal) {
+        // Mark all current results as processed for next listen() call
+        this._resultIndex = event.results.length;
+        this._finishListening(this._transcript);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === 'no-speech') {
+        this._finishListening('');
+      } else if (event.error === 'aborted') {
+        // Intentional abort, ignore
+      } else {
+        this._finishListening('', new Error(`Speech error: ${event.error}`));
+      }
+    };
+
+    recognition.onend = () => {
+      this._recognitionRunning = false;
+
+      // Recognition stopped - return whatever we have
+      if (this._listening) {
+        this._finishListening(this._transcript);
+      }
+
+      // Restart recognition to keep it always active
+      if (this._alwaysActive) {
+        this._resultIndex = 0;  // Reset index for fresh results
+        try {
+          recognition.start();
+          this._recognitionRunning = true;
+        } catch (e) {
+          // Already started or other error, ignore
+        }
+      }
+    };
+
+    this._recognition = recognition;
+  }
+
+  _finishListening(transcript, error = null) {
+    if (!this._listening) return;
+
+    this._listening = false;
+    const resolve = this._resolve;
+    const reject = this._reject;
+    this._resolve = null;
+    this._reject = null;
+    this._transcript = '';
+
+    // On file://, keep recognition running to avoid permission re-prompts
+    if (!this._alwaysActive) {
+      this._recognitionRunning = false;  // Mark stopped immediately, don't wait for onend
+      try {
+        this._recognition.stop();
+      } catch (e) {
+        // Ignore stop errors
+      }
+    }
+
+    if (error) {
+      reject?.(error);
+    } else {
+      resolve?.(transcript);
+    }
   }
 
   /**
@@ -59,48 +154,34 @@ export class SpeechListener {
         return;
       }
 
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;      // Stop after one utterance
-      recognition.interimResults = false;  // Only final results
-      recognition.lang = this.lang;
-
-      this._recognition = recognition;
       this._listening = true;
+      this._resolve = resolve;
+      this._reject = reject;
+      this._transcript = '';
 
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        this._listening = false;
-        this._recognition = null;
-        resolve(transcript);
-      };
+      // Always-active mode: keep recognition running between listens
+      // This avoids issues with stop/restart cycle failing on some browsers
+      this._alwaysActive = true;
 
-      recognition.onerror = (event) => {
-        this._listening = false;
-        this._recognition = null;
-
-        if (event.error === 'no-speech') {
-          // No speech detected - resolve with empty string
-          resolve('');
-        } else {
-          reject(new Error(`Speech error: ${event.error}`));
-        }
-      };
-
-      recognition.onend = () => {
-        // If we get here without a result, resolve empty
-        if (this._listening) {
-          this._listening = false;
-          this._recognition = null;
-          resolve('');
-        }
-      };
+      // If already running, just wait for next result
+      if (this._recognitionRunning) {
+        return;
+      }
 
       try {
-        recognition.start();
+        this._recognition.start();
+        this._recognitionRunning = true;
       } catch (e) {
-        this._listening = false;
-        this._recognition = null;
-        reject(e);
+        // Error - try reinitializing
+        this._recognitionRunning = false;
+        this._initRecognition();
+        try {
+          this._recognition.start();
+          this._recognitionRunning = true;
+        } catch (e2) {
+          this._listening = false;
+          reject(e2);
+        }
       }
     });
   }
@@ -109,6 +190,15 @@ export class SpeechListener {
    * Cancel current listening
    */
   cancel() {
+    this._listening = false;
+    this._resolve = null;
+    this._reject = null;
+
+    if (this._alwaysActive) {
+      // In always-active mode, just clear state but keep recognition running
+      return;
+    }
+
     if (this._recognition) {
       try {
         this._recognition.abort();
@@ -116,7 +206,26 @@ export class SpeechListener {
         // Ignore
       }
       this._recognition = null;
-      this._listening = false;
+    }
+  }
+
+  /**
+   * Stop recognition completely (for session end)
+   */
+  stop() {
+    this._alwaysActive = false;
+    this._listening = false;
+    this._recognitionRunning = false;
+    this._resolve = null;
+    this._reject = null;
+    this._resultIndex = 0;
+
+    if (this._recognition) {
+      try {
+        this._recognition.stop();
+      } catch (e) {
+        // Ignore
+      }
     }
   }
 

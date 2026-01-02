@@ -104,6 +104,9 @@ export function generateShareUrl(prompts, settings) {
       rewardText: settings.rewardText,
       petName: settings.petName,
       pronounProgression: settings.pronounProgression,
+      clickerEnabled: settings.clickerEnabled,
+      promptsEnabled: settings.promptsEnabled,
+      randomizePrompts: settings.randomizePrompts,
       sessionDuration: settings.sessionDuration,
       intensity: settings.intensity,
       delay: settings.delay,
@@ -120,6 +123,47 @@ export function generateShareUrl(prompts, settings) {
 
 export function isSharedConfig() {
   return parseUrlConfig() !== null;
+}
+
+/**
+ * Export config as a copyable text blob (base64 JSON)
+ */
+export function exportConfig(prompts, settings) {
+  const config = {
+    prompts,
+    settings: {
+      rewardText: settings.rewardText,
+      petName: settings.petName,
+      pronounProgression: settings.pronounProgression,
+      clickerEnabled: settings.clickerEnabled,
+      promptsEnabled: settings.promptsEnabled,
+      randomizePrompts: settings.randomizePrompts,
+      sessionDuration: settings.sessionDuration,
+      intensity: settings.intensity,
+      delay: settings.delay,
+      reward: settings.reward,
+      patternSwitch: settings.patternSwitch,
+    }
+  };
+  return btoa(JSON.stringify(config));
+}
+
+/**
+ * Import config from a text blob
+ * @returns {{ prompts: string[], settings: object } | null}
+ */
+export function importConfig(blob) {
+  try {
+    const decoded = atob(blob.trim());
+    const config = JSON.parse(decoded);
+    if (!config.prompts || !Array.isArray(config.prompts)) {
+      throw new Error('Invalid config: missing prompts');
+    }
+    return config;
+  } catch (e) {
+    console.warn('Failed to import config:', e);
+    return null;
+  }
 }
 
 export function onUrlChange(callback) {
@@ -194,6 +238,7 @@ const DEFAULT_SETTINGS = {
   pronounProgression: true,  // gradually shift "I" → petName over session
   clickerEnabled: false,     // play click sound with reward
   promptsEnabled: true,      // false = loading mode (auto clicker+vibe on timer)
+  randomizePrompts: true,    // shuffle prompt order each session
   sessionDuration: 600,  // 10 minutes in seconds
   intensity: {
     metapattern: 'close_up',
