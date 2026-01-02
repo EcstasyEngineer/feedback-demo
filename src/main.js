@@ -14,7 +14,6 @@ import {
   PATTERNS, SESSION_ARCS, onUrlChange, transformPrompt, getPromptVariants,
   exportConfig, importConfig
 } from './config.js';
-import clickerUrl from './assets/clicker.opus';
 
 // ============================================================================
 // App State
@@ -70,10 +69,19 @@ const clickerEnabledInput = document.getElementById('clickerEnabled');
 const promptsEnabledInput = document.getElementById('promptsEnabled');
 const randomizePromptsInput = document.getElementById('randomizePrompts');
 
-// Clicker sound
-const clickerAudio = new Audio(clickerUrl);
+// Clicker audio - works in Vite build (inlined) and raw serving (relative path)
+let clickerAudio = null;
+try {
+  // Try dynamic import first (Vite build inlines as base64)
+  const audioModule = await import('./assets/clicker.opus');
+  clickerAudio = new Audio(audioModule.default);
+} catch {
+  // Fall back to relative path (GitHub Pages raw serving)
+  clickerAudio = new Audio('./src/assets/clicker.opus');
+}
 clickerAudio.preload = 'auto';
 function playClick() {
+  if (!clickerAudio) return;
   clickerAudio.currentTime = 0;
   clickerAudio.play().catch(() => {});
 }
