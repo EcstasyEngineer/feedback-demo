@@ -236,8 +236,7 @@ const DEFAULT_SETTINGS = {
   rewardText: 'Good Puppet',
   petName: 'Puppet',
   pronounProgression: true,  // gradually shift "I" → petName over session
-  clickerEnabled: false,     // play click sound with reward
-  promptsEnabled: true,      // false = loading mode (auto clicker+vibe on timer)
+  clickerEnabled: true,      // play click sound with reward
   randomizePrompts: true,    // shuffle prompt order each session
   sessionDuration: 600,  // 10 minutes in seconds
   intensity: {

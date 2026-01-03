@@ -19,6 +19,7 @@ import {
 // App State
 // ============================================================================
 let device = null;
+let micConnected = false;
 let listener = null;
 let prompts = [];
 let settings = {};
@@ -31,6 +32,7 @@ const statusEl = document.getElementById('status');
 const promptEl = document.getElementById('prompt');
 const feedbackEl = document.getElementById('feedback');
 const connectBtn = document.getElementById('connectBtn');
+const connectMicBtn = document.getElementById('connectMicBtn');
 const startBtn = document.getElementById('startBtn');
 const testBtn = document.getElementById('testBtn');
 const settingsBtn = document.getElementById('settingsBtn');
@@ -66,7 +68,6 @@ const settingsDuration = document.getElementById('settingsDuration');
 const petNameInput = document.getElementById('petName');
 const pronounProgressionInput = document.getElementById('pronounProgression');
 const clickerEnabledInput = document.getElementById('clickerEnabled');
-const promptsEnabledInput = document.getElementById('promptsEnabled');
 const randomizePromptsInput = document.getElementById('randomizePrompts');
 
 // Clicker audio - works in Vite build (inlined) and raw serving (relative path)
@@ -106,6 +107,14 @@ function showFeedback(text, success = true) {
 // ============================================================================
 // Settings Panel
 // ============================================================================
+function updatePromptsSummary() {
+  const summary = document.getElementById('promptsSummary');
+  if (summary) {
+    const count = prompts.filter(p => p.trim()).length;
+    summary.textContent = `${count} item${count !== 1 ? 's' : ''}`;
+  }
+}
+
 function renderPromptList() {
   promptList.innerHTML = '';
   const showPreview = settings.pronounProgression && settings.petName;
@@ -133,6 +142,8 @@ function renderPromptList() {
 
     promptList.appendChild(container);
   });
+
+  updatePromptsSummary();
 }
 
 function updatePromptPreviews() {
@@ -180,8 +191,7 @@ function renderSettings() {
   if (rewardTextInput) rewardTextInput.value = settings.rewardText;
   if (petNameInput) petNameInput.value = settings.petName || 'Puppet';
   if (pronounProgressionInput) pronounProgressionInput.checked = settings.pronounProgression !== false;
-  if (clickerEnabledInput) clickerEnabledInput.checked = settings.clickerEnabled === true;
-  if (promptsEnabledInput) promptsEnabledInput.checked = settings.promptsEnabled !== false;
+  if (clickerEnabledInput) clickerEnabledInput.checked = settings.clickerEnabled !== false;
   if (randomizePromptsInput) randomizePromptsInput.checked = settings.randomizePrompts === true;
   if (settingsDuration) settingsDuration.value = Math.round(settings.sessionDuration / 60);
   if (switchMin) switchMin.value = settings.patternSwitch.minInstances;
@@ -310,8 +320,7 @@ function handleSettingsChange() {
   settings.rewardText = rewardTextInput?.value || 'Good Puppet';
   settings.petName = petNameInput?.value || 'Puppet';
   settings.pronounProgression = pronounProgressionInput?.checked ?? true;
-  settings.clickerEnabled = clickerEnabledInput?.checked ?? false;
-  settings.promptsEnabled = promptsEnabledInput?.checked ?? true;
+  settings.clickerEnabled = clickerEnabledInput?.checked ?? true;
   settings.randomizePrompts = randomizePromptsInput?.checked ?? false;
   settings.sessionDuration = Math.max(60, (parseInt(settingsDuration?.value) || 10) * 60);
   settings.patternSwitch.minInstances = Math.max(1, parseInt(switchMin?.value) || 4);
@@ -372,7 +381,6 @@ function handleSettingsChange() {
   saveSettings(settings);
   updateFieldStates();
   updatePromptPreviews();
-  updateStartButton();
 }
 
 function handleShare() {
@@ -445,9 +453,29 @@ function closeSettings() {
 // ============================================================================
 // Device & Speech
 // ============================================================================
-function updateStartButton() {
-  // Enable start if device connected OR clicker enabled (toyless mode)
-  startBtn.disabled = !(device || settings.clickerEnabled);
+async function handleConnectMic() {
+  if (micConnected) return;
+
+  if (!speechSupported()) {
+    setStatus('Speech recognition not supported in this browser', 'error');
+    return;
+  }
+
+  try {
+    setStatus('Requesting microphone...', 'info');
+
+    // Request mic permission via getUserMedia (more reliable than SpeechRecognition)
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(track => track.stop());  // Release immediately
+
+    micConnected = true;
+    connectMicBtn.textContent = '✓ Mic';
+    connectMicBtn.disabled = true;
+    setStatus('Microphone connected', 'success');
+  } catch (e) {
+    setStatus(`Microphone access denied: ${e.message}`, 'error');
+    console.error(e);
+  }
 }
 
 async function handleConnect() {
@@ -457,7 +485,6 @@ async function handleConnect() {
     setStatus(`Connected: ${device.name}`, 'success');
     connectBtn.textContent = `✓ ${device.name}`;
     connectBtn.disabled = true;
-    updateStartButton();
     testBtn.disabled = false;
   } catch (e) {
     setStatus(`Connection failed: ${e.message}`, 'error');
@@ -482,24 +509,10 @@ async function handleTest() {
 }
 
 async function runSequence() {
-  const promptMode = settings.promptsEnabled !== false;
-
-  if (!device) {
-    if (!settings.clickerEnabled) {
-      setStatus('Connect a device first (or enable clicker for toyless mode)', 'error');
-      return;
-    }
-    if (!confirm('No device connected. Start clicker-only session?')) {
-      return;
-    }
-  }
+  // Mic connected = call-and-response mode, otherwise loading mode
+  const promptMode = micConnected;
 
   if (promptMode) {
-    if (!speechSupported()) {
-      setStatus('Speech recognition not supported', 'error');
-      return;
-    }
-
     const validPrompts = prompts.filter(p => p.trim());
     if (validPrompts.length === 0) {
       setStatus('No prompts configured', 'error');
@@ -693,7 +706,6 @@ function handleStartStop() {
 // ============================================================================
 prompts = loadPrompts();
 settings = loadSettings();
-updateStartButton();
 
 if (isSharedConfig()) {
   setStatus('Loaded shared config - customize in settings', 'success');
@@ -701,6 +713,7 @@ if (isSharedConfig()) {
 
 // Event listeners
 connectBtn?.addEventListener('click', handleConnect);
+connectMicBtn?.addEventListener('click', handleConnectMic);
 startBtn?.addEventListener('click', handleStartStop);
 testBtn?.addEventListener('click', handleTest);
 settingsBtn?.addEventListener('click', openSettings);
@@ -744,8 +757,37 @@ promptList?.addEventListener('click', handleDeletePrompt);
 });
 pronounProgressionInput?.addEventListener('change', handleSettingsChange);
 clickerEnabledInput?.addEventListener('change', handleSettingsChange);
-promptsEnabledInput?.addEventListener('change', handleSettingsChange);
 randomizePromptsInput?.addEventListener('change', handleSettingsChange);
+
+// Collapsible sections
+document.querySelectorAll('.collapsible-header').forEach(header => {
+  header.addEventListener('click', () => {
+    header.closest('.collapsible-section').classList.toggle('open');
+  });
+});
+
+// Update summaries when settings change
+function updateCollapsibleSummaries() {
+  const intensitySummary = document.getElementById('intensitySummary');
+  const rewardSummary = document.getElementById('rewardSummary');
+  const delaySummary = document.getElementById('delaySummary');
+
+  if (intensitySummary) {
+    intensitySummary.textContent = `${intensityMin?.value || 10}-${intensityMax?.value || 70}%`;
+  }
+  if (rewardSummary) {
+    rewardSummary.textContent = `${rewardMin?.value || 0.5}-${rewardMax?.value || 1.2}s`;
+  }
+  if (delaySummary) {
+    delaySummary.textContent = `${delayMin?.value || 4}-${delayMax?.value || 12}s`;
+  }
+}
+
+// Update summaries on input change
+[intensityMin, intensityMax, rewardMin, rewardMax, delayMin, delayMax].forEach(el => {
+  el?.addEventListener('input', updateCollapsibleSummaries);
+});
+updateCollapsibleSummaries();
 
 // Handle URL changes (for shared links pasted into already-open page)
 onUrlChange(() => {
@@ -776,18 +818,52 @@ function simulateSession() {
   const dataPoints = [];
   let simulatedTime = 0;
 
+  // Track pattern switches
+  let lastIntensityPattern = simSession.intensity.currentPattern;
+  let lastDelayPattern = simSession.delay.currentPattern;
+  let lastRewardPattern = simSession.reward.currentPattern;
+
   for (let i = 0; i < estimatedPrompts && simulatedTime < durationMs; i++) {
     // Override session start time to simulate progress
     simSession.startTime = Date.now() - simulatedTime;
+    const progress = simulatedTime / durationMs;
+
+    // Calculate session arc bounds for this point in time
+    const intensityArc = SESSION_ARCS[settings.intensity.metapattern]?.(progress) || { min: 0, max: 1 };
+    const delayArc = SESSION_ARCS[settings.delay.metapattern]?.(progress) || { min: 0, max: 1 };
+    const rewardArc = SESSION_ARCS[settings.reward.metapattern]?.(progress) || { min: 0, max: 1 };
+
+    // Detect pattern switches
+    const patternSwitches = [];
+    if (simSession.intensity.currentPattern !== lastIntensityPattern) {
+      patternSwitches.push('intensity');
+      lastIntensityPattern = simSession.intensity.currentPattern;
+    }
+    if (simSession.delay.currentPattern !== lastDelayPattern) {
+      patternSwitches.push('delay');
+      lastDelayPattern = simSession.delay.currentPattern;
+    }
+    if (simSession.reward.currentPattern !== lastRewardPattern) {
+      patternSwitches.push('reward');
+      lastRewardPattern = simSession.reward.currentPattern;
+    }
 
     const values = getNextValues(settings, simSession);
 
     dataPoints.push({
       time: simulatedTime,
-      progress: simulatedTime / durationMs,
+      progress,
       intensity: values.intensity,
       delay: values.delay,
       reward: values.reward,
+      // Arc bounds (normalized 0-1 within configured min/max)
+      intensityArcMin: settings.intensity.min + (settings.intensity.max - settings.intensity.min) * intensityArc.min,
+      intensityArcMax: settings.intensity.min + (settings.intensity.max - settings.intensity.min) * intensityArc.max,
+      delayArcMin: settings.delay.min + (settings.delay.max - settings.delay.min) * delayArc.min,
+      delayArcMax: settings.delay.min + (settings.delay.max - settings.delay.min) * delayArc.max,
+      rewardArcMin: settings.reward.min + (settings.reward.max - settings.reward.min) * rewardArc.min,
+      rewardArcMax: settings.reward.min + (settings.reward.max - settings.reward.min) * rewardArc.max,
+      patternSwitches,
     });
 
     simulatedTime += values.delay;
@@ -819,9 +895,6 @@ function drawVisualization(dataPoints) {
 
   const width = rect.width;
   const height = rect.height;
-  const padding = { top: 20, right: 20, bottom: 30, left: 50 };
-  const plotWidth = width - padding.left - padding.right;
-  const plotHeight = height - padding.top - padding.bottom;
 
   // Clear
   ctx.fillStyle = '#0a0a12';
@@ -830,100 +903,220 @@ function drawVisualization(dataPoints) {
   if (dataPoints.length === 0) return;
 
   const durationMs = settings.sessionDuration * 1000;
-  const maxDelay = Math.max(...dataPoints.map(d => d.delay));
-  const maxReward = Math.max(...dataPoints.map(d => d.reward));
 
-  // Draw grid
-  ctx.strokeStyle = '#222';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = padding.top + (plotHeight / 4) * i;
+  // Three stacked sub-graphs
+  const graphs = [
+    {
+      label: 'Intensity',
+      color: '#00ff88',
+      colorFaded: 'rgba(0, 255, 136, 0.15)',
+      getValue: d => d.intensity,
+      getArcMin: d => d.intensityArcMin,
+      getArcMax: d => d.intensityArcMax,
+      min: settings.intensity.min,
+      max: settings.intensity.max,
+      configMin: settings.intensity.min,
+      configMax: settings.intensity.max,
+      unit: '%',
+      formatVal: v => Math.round(v * 100),
+      metapattern: settings.intensity.metapattern,
+    },
+    {
+      label: 'Delay',
+      color: '#00d4ff',
+      colorFaded: 'rgba(0, 212, 255, 0.15)',
+      getValue: d => d.delay / 1000,
+      getArcMin: d => d.delayArcMin,
+      getArcMax: d => d.delayArcMax,
+      min: settings.delay.min,
+      max: settings.delay.max,
+      configMin: settings.delay.min,
+      configMax: settings.delay.max,
+      unit: 's',
+      formatVal: v => v.toFixed(1),
+      metapattern: settings.delay.metapattern,
+    },
+    {
+      label: 'Reward',
+      color: '#ff6b6b',
+      colorFaded: 'rgba(255, 107, 107, 0.15)',
+      getValue: d => d.reward / 1000,
+      getArcMin: d => d.rewardArcMin,
+      getArcMax: d => d.rewardArcMax,
+      min: settings.reward.min,
+      max: settings.reward.max,
+      configMin: settings.reward.min,
+      configMax: settings.reward.max,
+      unit: 's',
+      formatVal: v => v.toFixed(1),
+      metapattern: settings.reward.metapattern,
+    },
+  ];
+
+  const padding = { top: 8, right: 16, bottom: 28, left: 55 };
+  const graphGap = 12;
+  const graphHeight = (height - padding.top - padding.bottom - graphGap * 2) / 3;
+  const plotWidth = width - padding.left - padding.right;
+
+  // Draw each sub-graph
+  graphs.forEach((graph, graphIndex) => {
+    const graphTop = padding.top + graphIndex * (graphHeight + graphGap);
+    const graphBottom = graphTop + graphHeight;
+
+    // Background
+    ctx.fillStyle = '#0d0d18';
+    ctx.fillRect(padding.left, graphTop, plotWidth, graphHeight);
+
+    // Helper to convert value to Y coordinate
+    const valueToY = (val) => {
+      const normalized = (val - graph.min) / (graph.max - graph.min);
+      return graphBottom - normalized * graphHeight;
+    };
+
+    // Helper to convert time to X coordinate
+    const timeToX = (time) => padding.left + (time / durationMs) * plotWidth;
+
+    // Draw session arc envelope (shaded region)
+    ctx.fillStyle = graph.colorFaded;
     ctx.beginPath();
-    ctx.moveTo(padding.left, y);
-    ctx.lineTo(width - padding.right, y);
+    // Top edge (max values)
+    dataPoints.forEach((d, i) => {
+      const x = timeToX(d.time);
+      const y = valueToY(graph.getArcMax(d));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    // Bottom edge (min values) - reverse order
+    for (let i = dataPoints.length - 1; i >= 0; i--) {
+      const d = dataPoints[i];
+      const x = timeToX(d.time);
+      const y = valueToY(graph.getArcMin(d));
+      ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw envelope border lines
+    ctx.strokeStyle = graph.color;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+
+    // Max line
+    ctx.beginPath();
+    dataPoints.forEach((d, i) => {
+      const x = timeToX(d.time);
+      const y = valueToY(graph.getArcMax(d));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
     ctx.stroke();
-  }
 
-  // Y-axis labels
-  ctx.fillStyle = '#666';
+    // Min line
+    ctx.beginPath();
+    dataPoints.forEach((d, i) => {
+      const x = timeToX(d.time);
+      const y = valueToY(graph.getArcMin(d));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    // Draw pattern switch indicators
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 1;
+    const switchKey = graph.label.toLowerCase();
+    dataPoints.forEach(d => {
+      if (d.patternSwitches.includes(switchKey)) {
+        const x = timeToX(d.time);
+        ctx.beginPath();
+        ctx.moveTo(x, graphTop);
+        ctx.lineTo(x, graphBottom);
+        ctx.stroke();
+      }
+    });
+
+    // Draw grid lines
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = graphTop + (graphHeight / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+    }
+
+    // Draw actual values line
+    ctx.strokeStyle = graph.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    dataPoints.forEach((d, i) => {
+      const x = timeToX(d.time);
+      const y = valueToY(graph.getValue(d));
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Draw dots
+    ctx.fillStyle = graph.color;
+    dataPoints.forEach(d => {
+      const x = timeToX(d.time);
+      const y = valueToY(graph.getValue(d));
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Y-axis labels
+    ctx.fillStyle = '#666';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+
+    // Min and max labels
+    ctx.fillText(`${graph.formatVal(graph.max)}${graph.unit}`, padding.left - 6, graphTop + 4);
+    ctx.fillText(`${graph.formatVal(graph.min)}${graph.unit}`, padding.left - 6, graphBottom - 4);
+
+    // Graph label
+    ctx.fillStyle = graph.color;
+    ctx.font = 'bold 11px system-ui';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${graph.label}`, padding.left + 6, graphTop + 4);
+
+    // Arc label
+    ctx.fillStyle = '#555';
+    ctx.font = '9px system-ui';
+    const arcLabel = graph.metapattern.replace(/_/g, ' ');
+    ctx.fillText(`(${arcLabel})`, padding.left + 6 + ctx.measureText(graph.label).width + 6, graphTop + 5);
+  });
+
+  // X-axis labels (only once at bottom)
+  ctx.fillStyle = '#888';
   ctx.font = '11px monospace';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  for (let i = 0; i <= 4; i++) {
-    const y = padding.top + (plotHeight / 4) * i;
-    const val = 100 - (i * 25);
-    ctx.fillText(`${val}%`, padding.left - 8, y);
-  }
-
-  // X-axis labels (time)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   const durationMin = settings.sessionDuration / 60;
   for (let i = 0; i <= 4; i++) {
     const x = padding.left + (plotWidth / 4) * i;
     const mins = (durationMin / 4) * i;
-    ctx.fillText(`${mins.toFixed(1)}m`, x, height - padding.bottom + 8);
+    ctx.fillText(`${mins.toFixed(1)}m`, x, height - padding.bottom + 10);
   }
-
-  // Helper to draw a line series
-  function drawLine(data, getValue, color, normalize = 1) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    data.forEach((d, i) => {
-      const x = padding.left + (d.time / durationMs) * plotWidth;
-      const val = getValue(d) / normalize;
-      const y = padding.top + plotHeight * (1 - Math.min(1, val));
-
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-
-    ctx.stroke();
-  }
-
-  // Draw dots for each data point
-  function drawDots(data, getValue, color, normalize = 1) {
-    ctx.fillStyle = color;
-
-    data.forEach(d => {
-      const x = padding.left + (d.time / durationMs) * plotWidth;
-      const val = getValue(d) / normalize;
-      const y = padding.top + plotHeight * (1 - Math.min(1, val));
-
-      ctx.beginPath();
-      ctx.arc(x, y, 3, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }
-
-  // Draw intensity (0-1 scale)
-  drawLine(dataPoints, d => d.intensity, '#00ff88');
-  drawDots(dataPoints, d => d.intensity, '#00ff88');
-
-  // Draw delay (normalized to max)
-  drawLine(dataPoints, d => d.delay, '#00d4ff', maxDelay);
-  drawDots(dataPoints, d => d.delay, '#00d4ff', maxDelay);
-
-  // Draw reward (normalized to max)
-  drawLine(dataPoints, d => d.reward, '#ff6b6b', maxReward);
-  drawDots(dataPoints, d => d.reward, '#ff6b6b', maxReward);
 
   // Stats
   const avgIntensity = dataPoints.reduce((s, d) => s + d.intensity, 0) / dataPoints.length;
   const avgDelay = dataPoints.reduce((s, d) => s + d.delay, 0) / dataPoints.length / 1000;
   const avgReward = dataPoints.reduce((s, d) => s + d.reward, 0) / dataPoints.length / 1000;
 
-  // First and last few delays to show the spread
-  const firstDelays = dataPoints.slice(0, 3).map(d => (d.delay / 1000).toFixed(1)).join(', ');
-  const lastDelays = dataPoints.slice(-3).map(d => (d.delay / 1000).toFixed(1)).join(', ');
-
-  vizStats.innerHTML = `${dataPoints.length} prompts | ` +
-    `Avg intensity: ${Math.round(avgIntensity * 100)}% | ` +
-    `Avg delay: ${avgDelay.toFixed(1)}s | ` +
-    `Avg reward: ${avgReward.toFixed(2)}s<br>` +
-    `<span style="color:#00d4ff">Delays: first [${firstDelays}s] → last [${lastDelays}s]</span>`;
+  vizStats.innerHTML = `<strong>${dataPoints.length} prompts</strong> over ${durationMin.toFixed(0)} min &nbsp;|&nbsp; ` +
+    `<span style="color:#00ff88">Avg intensity: ${Math.round(avgIntensity * 100)}%</span> &nbsp;|&nbsp; ` +
+    `<span style="color:#00d4ff">Avg delay: ${avgDelay.toFixed(1)}s</span> &nbsp;|&nbsp; ` +
+    `<span style="color:#ff6b6b">Avg reward: ${avgReward.toFixed(2)}s</span>`;
 }
 
 function showVisualization() {
@@ -950,8 +1143,6 @@ vizModal?.addEventListener('click', (e) => {
 });
 
 // Init status
-if (!speechSupported()) {
-  setStatus('Speech recognition not supported in this browser', 'error');
-} else if (!isSharedConfig()) {
-  setStatus('Ready - connect a device to start', 'info');
+if (!isSharedConfig()) {
+  setStatus('Ready', 'info');
 }
